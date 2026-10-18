@@ -1,0 +1,30 @@
+services:
+  # צד השרת (Backend) - מבוסס פייתון
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      - MONGO_URI=mongodb://mongo:27017/focusflow_db
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-focusflow-local-dev-secret-change-before-deploy}
+    depends_on:
+      - mongo
+
+  # צד הלקוח (Frontend) - מבוסס ווב / React
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+
+  # מסד הנתונים (MongoDB)
+  mongo:
+    image: mongo:latest
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+volumes:
+  mongo_data:
