@@ -12,7 +12,7 @@ async function request(path, { token, ...options } = {}) {
 
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
-    const error = new Error(payload?.detail || 'הבקשה נכשלה. נסו שוב.');
+    const error = new Error(payload?.message || payload?.detail || 'הבקשה נכשלה. נסו שוב.');
     error.status = response.status;
     throw error;
   }
@@ -43,4 +43,20 @@ export const api = {
     `/api/content/${encodeURIComponent(id)}/attention`,
     { token, method: 'POST', body: JSON.stringify({ score }) },
   ),
+  startSession: (token, contentId) => request('/api/sessions', {
+    token,
+    method: 'POST',
+    body: JSON.stringify({ content_id: contentId }),
+  }),
+  addReading: (token, sessionId, payload) => request(`/api/sessions/${encodeURIComponent(sessionId)}/readings`, {
+    token,
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+  endSession: (token, sessionId) => request(`/api/sessions/${encodeURIComponent(sessionId)}/end`, {
+    token,
+    method: 'POST',
+  }),
+  getSessions: (token) => request('/api/sessions', { token }),
+  getSession: (token, sessionId) => request(`/api/sessions/${encodeURIComponent(sessionId)}`, { token }),
 };
