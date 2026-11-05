@@ -6,10 +6,9 @@ RUN npm install
 COPY . .
 RUN npm run build
 
-# שלב ההרצה באמצעות שרת אינטרנט קליל (למשל Nginx)
+# שלב ההרצה
 FROM nginx:alpine
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist /usr/share/nginx/html
-
-# פתיחת הפורט ללקוח (לפי ההנחיות: 3000 - ניתן להתאים את Nginx או להשתמש בשרת פיתוח לפי הצורך)
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
