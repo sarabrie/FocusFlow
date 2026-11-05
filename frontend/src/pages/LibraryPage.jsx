@@ -187,9 +187,9 @@ export function LibraryPage({ token, user, onOpen, onSignOut, onUnauthorized }) 
               <label>
                 {type === 'link' ? 'כתובת הקישור' : 'גוף הטקסט'}
                 {type === 'link' ? (
-                  <input type="url" value={form.source} onChange={(event) => setForm({ ...form, source: event.target.value })} placeholder="https://" required />
+                  <input type="url" value={form.source} onChange={(event) => setForm({ ...form, source: event.target.value })} placeholder="https://" pattern="https?://.+" title="קישור שמתחיל ב-http:// או https://" maxLength={2048} required />
                 ) : (
-                  <textarea value={form.source} onChange={(event) => setForm({ ...form, source: event.target.value })} placeholder="הדביקו כאן את הטקסט לקריאה..." rows={6} required />
+                  <textarea value={form.source} onChange={(event) => setForm({ ...form, source: event.target.value })} placeholder="הדביקו כאן את הטקסט לקריאה..." rows={6} maxLength={50000} required />
                 )}
               </label>
 

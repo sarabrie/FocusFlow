@@ -342,7 +342,10 @@ export function ReaderPage({ content, token, onBack, onUnauthorized, onViewHisto
             <>
               <div className="external-source">
                 <Link2 size={17} />
-                <a href={content.source} target="_blank" rel="noreferrer">פתיחת המקור בחלון חדש</a>
+                {/* Only http(s) becomes a link; "javascript:" URLs saved before server validation would run on click. */}
+                {/^https?:\/\//i.test(content.source) && (
+                  <a href={content.source} target="_blank" rel="noopener noreferrer">פתיחת המקור בחלון חדש</a>
+                )}
                 <span>{content.source}</span>
               </div>
 

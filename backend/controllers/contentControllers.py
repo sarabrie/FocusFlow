@@ -2,6 +2,7 @@ from bson import ObjectId
 from fastapi import HTTPException, Response, status
 
 from models.contentModels import AttentionScoreModel, ContentModel
+from models.sessionModels import SessionModel
 from schemas.content import (
 	AttentionScoreCreate,
 	AttentionScoreResponse,
@@ -50,12 +51,16 @@ async def get_content(content_id: str, user_id: ObjectId) -> ContentResponse:
 
 
 async def delete_content(content_id: str, user_id: ObjectId) -> Response:
-	deleted = await ContentModel.delete_for_user(parse_content_id(content_id), user_id)
+	parsed_content_id = parse_content_id(content_id)
+	deleted = await ContentModel.delete_for_user(parsed_content_id, user_id)
 	if not deleted:
 		raise HTTPException(
 			status_code=status.HTTP_404_NOT_FOUND,
 			detail="Content not found",
 		)
+	# Deleting content also deletes the attention data measured on it, so nothing is left behind.
+	await SessionModel.delete_for_content(parsed_content_id, user_id)
+	await AttentionScoreModel.delete_for_content(parsed_content_id, user_id)
 	return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

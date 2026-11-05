@@ -48,6 +48,10 @@ class SessionModel:
         await db.sessions.delete_many({"user_id": user_id})
 
     @staticmethod
+    async def delete_for_content(content_id: ObjectId, user_id: ObjectId):
+        await db.sessions.delete_many({"content_id": content_id, "user_id": user_id})
+
+    @staticmethod
     async def parse_id(session_id: str):
         if not ObjectId.is_valid(session_id):
             raise InvalidId(f"Invalid session id: {session_id}")
