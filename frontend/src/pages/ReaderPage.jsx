@@ -307,9 +307,26 @@ export function ReaderPage({ content, token, onBack, onUnauthorized, onViewHisto
 
           <AttentionGauge percent={scorePercent} />
 
+          {tracker.breakdown && (
+            <dl className="score-compare">
+              <div className="is-primary"><dt>גאומטרי בלבד</dt><dd>{scorePercent}%</dd></div>
+              <div><dt>משולב (90% גאומטרי + 10% מודל)</dt><dd>{tracker.breakdown.combined === null ? 'ממתין למודל' : `${Math.round(tracker.breakdown.combined * 100)}%`}</dd></div>
+              <div><dt>מודל ONNX לבד</dt><dd>{tracker.breakdown.model === null ? 'ממתין' : `${Math.round(tracker.breakdown.model * 100)}%`}</dd></div>
+            </dl>
+          )}
+
+          {tracker.breakdown && (
+            <dl className="score-breakdown">
+              <div><dt>כיוון ראש</dt><dd>{Math.round(tracker.breakdown.head * 100)}</dd></div>
+              <div><dt>מבט</dt><dd>{Math.round(tracker.breakdown.gaze * 100)}</dd></div>
+              <div><dt>עיניים פתוחות</dt><dd>{Math.round(tracker.breakdown.eyes * 100)}</dd></div>
+              <div><dt>פנים בפריים</dt><dd>{Math.round(tracker.breakdown.face * 100)}</dd></div>
+            </dl>
+          )}
+
           <div className="capture-status">
             <span className={`status-dot ${tracker.cameraState === 'running' ? 'is-live' : ''}`} />
-            {tracker.cameraState === 'running' ? (tracker.faceDetected ? `פנים זוהו · ${tracker.progressText}` : 'מחפשים פנים בפריים') : tracker.cameraState === 'starting' ? 'מתחברים למצלמה...' : 'המצלמה כבויה'}
+            {tracker.cameraState === 'running' ? (tracker.faceDetected ? 'פנים זוהו' : 'מחפשים פנים בפריים') : tracker.cameraState === 'starting' ? 'מתחברים למצלמה...' : 'המצלמה כבויה'}
           </div>
 
           {/* The video stays mounted so the tracker can attach the stream before the camera is "running". */}
@@ -335,7 +352,7 @@ export function ReaderPage({ content, token, onBack, onUnauthorized, onViewHisto
               </span>
             </div>
 
-            <small>{tracker.modelName || 'v4_2.onnx'} · קלט צפוי: 100 פריימים × 478 נקודות × XYZ; פלט: הסתברות 0–1.</small>
+            <small>הציון מחושב מכיוון הראש, המבט ופתיחת העיניים ב-3 השניות האחרונות, ומתעדכן כל שנייה. {tracker.modelName || 'v4_2.onnx'} לא נכנס לציון ומוצג רק להשוואה ({tracker.progressText}).</small>
           </div>
 
           {sessionSummary ? (
@@ -366,7 +383,7 @@ export function ReaderPage({ content, token, onBack, onUnauthorized, onViewHisto
                   }
                   await handleStartCamera();
                 }}
-                disabled={!consent || tracker.modelState !== 'ready' || tracker.cameraState === 'starting' || tracker.cameraState === 'running'}
+                disabled={!consent || tracker.cameraState === 'starting' || tracker.cameraState === 'running'}
               >
                 {tracker.cameraState === 'starting' ? 'מתחבר...' : sessionId ? 'הפעלת מצלמה' : 'התחל סשן'}
               </button>
