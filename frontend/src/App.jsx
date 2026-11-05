@@ -1,6 +1,7 @@
 ﻿import React from 'react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { AuthPage } from './pages/AuthPage';
+import { HistoryPage } from './pages/HistoryPage';
 import { LibraryPage } from './pages/LibraryPage';
 import { ReaderPage } from './pages/ReaderPage';
 
@@ -12,10 +13,35 @@ function readSavedSession() {
   }
 }
 
+function AppNav({ currentScreen, onLibrary, onHistory, onSignOut }) {
+  const titleMap = {
+    library: 'הספרייה שלי',
+    history: 'היסטוריה',
+    reader: 'קורא',
+  };
+
+  return (
+    <nav className="app-nav" aria-label="ניווט ראשי">
+      <div className="app-nav-main">
+        <button type="button" className={currentScreen === 'library' ? 'nav-tab active' : 'nav-tab'} onClick={onLibrary}>
+          הספרייה שלי
+        </button>
+        <button type="button" className={currentScreen === 'history' ? 'nav-tab active' : 'nav-tab'} onClick={onHistory}>
+          היסטוריה
+        </button>
+      </div>
+      <div className="app-nav-view">{titleMap[currentScreen] || 'FocusFlow'}</div>
+      <button type="button" className="nav-logout" onClick={onSignOut}>התנתק</button>
+    </nav>
+  );
+}
+
 export default function App() {
   const [session, setSession] = useState(readSavedSession);
   const [screen, setScreen] = useState('library');
   const [activeContent, setActiveContent] = useState(null);
+
+  const authToken = useMemo(() => session?.access_token || '', [session]);
 
   function signOut() {
     localStorage.removeItem('focusflow_session');
@@ -35,24 +61,51 @@ export default function App() {
     );
   }
 
-  if (screen === 'reader' && activeContent) {
+  const renderScreen = () => {
+    if (screen === 'reader' && activeContent) {
+      return (
+        <ReaderPage
+          content={activeContent}
+          token={authToken}
+          onBack={() => { setScreen('library'); setActiveContent(null); }}
+          onUnauthorized={signOut}
+          onViewHistory={() => setScreen('history')}
+        />
+      );
+    }
+
+    if (screen === 'history') {
+      return (
+        <HistoryPage
+          token={authToken}
+          onBack={() => setScreen('library')}
+          onUnauthorized={signOut}
+          onOpenContent={(content) => { setActiveContent(content); setScreen('reader'); }}
+        />
+      );
+    }
+
     return (
-      <ReaderPage
-        content={activeContent}
-        token={session.access_token}
-        onBack={() => { setScreen('library'); setActiveContent(null); }}
+      <LibraryPage
+        token={authToken}
+        user={session}
+        onOpen={(content) => { setActiveContent(content); setScreen('reader'); }}
+        onSignOut={signOut}
         onUnauthorized={signOut}
+        onViewHistory={() => setScreen('history')}
       />
     );
-  }
+  };
 
   return (
-    <LibraryPage
-      token={session.access_token}
-      user={session}
-      onOpen={(content) => { setActiveContent(content); setScreen('reader'); }}
-      onSignOut={signOut}
-      onUnauthorized={signOut}
-    />
+    <>
+      <AppNav
+        currentScreen={screen}
+        onLibrary={() => { setScreen('library'); setActiveContent(null); }}
+        onHistory={() => setScreen('history')}
+        onSignOut={signOut}
+      />
+      {renderScreen()}
+    </>
   );
 }

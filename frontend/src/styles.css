@@ -158,6 +158,22 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .score-display { position: relative; display: flex; align-items: baseline; gap: 6px; margin: 15px 0 11px; }
 .score-display strong { font-size: 44px; line-height: 1; font-weight: 500; font-variant-numeric: tabular-nums; }
 .score-display > span { color: #879188; font-size: 11px; }
+.attention-gauge { --gauge-tone: #b9c4ba; display: grid; justify-items: center; margin: 6px auto 4px; width: 100%; max-width: 230px; }
+.attention-gauge.tone-low { --gauge-tone: var(--danger); }
+.attention-gauge.tone-mid { --gauge-tone: #e0a43a; }
+.attention-gauge.tone-high { --gauge-tone: #5f9a3a; }
+.attention-gauge svg { display: block; width: 100%; height: auto; overflow: visible; }
+.gauge-track, .gauge-fill { fill: none; stroke-width: 10; stroke-linecap: round; }
+.gauge-track { stroke: #e8eee7; }
+.gauge-fill { stroke: var(--gauge-tone); transition: stroke-dashoffset 1.1s cubic-bezier(.34, 1.36, .5, 1), stroke .4s ease; }
+.gauge-tick { stroke: #b4c0b5; stroke-width: 1; }
+.gauge-tick.major { stroke: #708075; stroke-width: 1.6; }
+.gauge-label { fill: #879188; font-size: 9px; text-anchor: middle; dominant-baseline: middle; font-variant-numeric: tabular-nums; }
+.gauge-needle { transform-origin: 100px 100px; transition: transform 1.1s cubic-bezier(.34, 1.36, .5, 1); }
+.gauge-needle path { fill: var(--ink); }
+.gauge-hub { fill: var(--ink); stroke: #fff; stroke-width: 2.5; }
+.gauge-value { fill: var(--ink); font-size: 26px; font-weight: 500; text-anchor: middle; dominant-baseline: middle; font-variant-numeric: tabular-nums; }
+.gauge-caption { fill: var(--gauge-tone); font-size: 11px; font-weight: 600; text-anchor: middle; dominant-baseline: middle; }
 .score-track, .window-progress > div { overflow: hidden; width: 100%; height: 4px; background: #e8eee7; border-radius: 10px; }
 .score-track { position: absolute; bottom: -8px; }
 .score-track i, .window-progress i { display: block; height: 100%; background: var(--lime-dark); border-radius: inherit; transition: width .3s ease; }

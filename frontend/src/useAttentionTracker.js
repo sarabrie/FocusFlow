@@ -1,69 +1,122 @@
 import { useEffect, useRef, useState } from 'react';
 import { FaceLandmarker, FilesetResolver } from '@mediapipe/tasks-vision';
 import * as ort from 'onnxruntime-web';
-import { api } from './api';
 
 const SAMPLE_INTERVAL_MS = 100;
+const INFERENCE_INTERVAL_MS = 3000;
 const WINDOW_SIZE = 100;
+const NO_FACE_FRAME_LIMIT = 10;
 const LANDMARK_COUNT = 478;
 const VALUES_PER_POINT = 3;
-const FACE_TASK_URL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
-const VISION_WASM_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21/wasm';
+const MODEL_PATH = '/models/v4_2.onnx';
+const FACE_TASK_PATH = '/models/face_landmarker.task';
+const VISION_WASM_PATH = '/mediapipe/wasm';
+// v4_2.onnx outputs: regression_scores [B,1] (already sigmoid, 0–1), classification_logits [B,5], attention_weights [B,T]
+const SCORE_OUTPUT = 'regression_scores';
 
-export function useAttentionTracker({ token, contentId, onUnauthorized }) {
+const modelCache = { session: null, promise: null };
+
+// Only the .wasm binary is served from /ort/. The JS glue is embedded in the ORT bundle;
+// pointing ORT at /ort/*.mjs breaks under Vite dev (public files can't be imported as modules).
+ort.env.wasm.wasmPaths = { wasm: '/ort/ort-wasm-simd-threaded.jsep.wasm' };
+ort.env.wasm.numThreads = 1;
+
+function getProgressText(frameCount) {
+  if (frameCount <= 0) return 'אוסף נתונים... 0 מתוך 10 שניות';
+  const steps = Math.max(1, Math.min(10, Math.round((frameCount / WINDOW_SIZE) * 10)));
+  return `אוסף נתונים... ${steps} מתוך 10 שניות`;
+}
+
+export function useAttentionTracker({ onScore, onUnauthorized }) {
   const videoRef = useRef(null);
   const overlayRef = useRef(null);
   const landmarkerRef = useRef(null);
   const sessionRef = useRef(null);
   const streamRef = useRef(null);
-  const intervalRef = useRef(null);
+  const captureIntervalRef = useRef(null);
+  const inferenceIntervalRef = useRef(null);
   const framesRef = useRef([]);
-  const pendingFramesRef = useRef(null);
   const busyRef = useRef(false);
-  const [modelName, setModelName] = useState('');
-  const [modelState, setModelState] = useState('empty');
+  const noFaceFramesRef = useRef(0);
+  const onScoreRef = useRef(onScore);
+  const [modelName, setModelName] = useState('v4_2.onnx');
+  const [modelState, setModelState] = useState('loading');
   const [cameraState, setCameraState] = useState('off');
   const [faceDetected, setFaceDetected] = useState(false);
   const [frameCount, setFrameCount] = useState(0);
   const [latestScore, setLatestScore] = useState(null);
+  const [lowAttention, setLowAttention] = useState(false);
+  const [progressText, setProgressText] = useState('אוסף נתונים... 0 מתוך 10 שניות');
   const [error, setError] = useState('');
 
-  async function loadModel(file) {
-    if (!file) return;
+  useEffect(() => {
+    onScoreRef.current = onScore;
+  }, [onScore]);
+
+  async function loadModel() {
+    if (modelCache.session) {
+      sessionRef.current = modelCache.session;
+      setModelName('v4_2.onnx');
+      setModelState('ready');
+      setProgressText('אוסף נתונים... 0 מתוך 10 שניות');
+      return;
+    }
+
     setError('');
     setModelState('loading');
+    setProgressText('טוען מודל...');
+
     try {
-      const session = await ort.InferenceSession.create(await file.arrayBuffer(), {
-        executionProviders: ['wasm'],
-      });
-      if (session.inputNames.length !== 1 || session.outputNames.length < 1) {
-        throw new Error('המודל חייב להכיל קלט יחיד ופלט ציון.');
+      if (!modelCache.promise) {
+        modelCache.promise = ort.InferenceSession.create(MODEL_PATH, { executionProviders: ['wasm'] });
       }
+      const session = await modelCache.promise;
+
+      if (!session?.inputNames?.length || !session.outputNames?.includes(SCORE_OUTPUT)) {
+        throw new Error(`המודל חייב להכיל פלט בשם ${SCORE_OUTPUT}.`);
+      }
+
+      modelCache.session = session;
       sessionRef.current = session;
-      setModelName(file.name);
+      setModelName('v4_2.onnx');
       setModelState('ready');
+      setProgressText('אוסף נתונים... 0 מתוך 10 שניות');
     } catch (loadError) {
       sessionRef.current = null;
+      modelCache.session = null;
+      modelCache.promise = null;
       setModelState('error');
       setError(`לא ניתן לטעון את מודל ה־ONNX: ${loadError.message}`);
+    } finally {
+      modelCache.promise = null;
     }
   }
 
   async function startCamera() {
     if (!sessionRef.current) {
-      setError('יש לטעון מודל ONNX לפני הפעלת המצלמה.');
+      setError('לא ניתן להפעיל את המצלמה: המודל עדיין לא נטען.');
       return;
     }
+
+    if (!navigator?.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
+      setCameraState('error');
+      setError('המצלמה לא זמינה בדפדפן הזה. השתמשו ב-Chrome או Edge ב-localhost/HTTPS ובחרו לאפשר גישה למצלמה.');
+      return;
+    }
+
     setError('');
     setCameraState('starting');
+    setProgressText('אוסף נתונים... 0 מתוך 10 שניות');
+
     try {
-      const vision = await FilesetResolver.forVisionTasks(VISION_WASM_URL);
+      const vision = await FilesetResolver.forVisionTasks(VISION_WASM_PATH);
       const options = {
-        baseOptions: { modelAssetPath: FACE_TASK_URL },
+        baseOptions: { modelAssetPath: FACE_TASK_PATH },
         runningMode: 'VIDEO',
         numFaces: 1,
         outputFaceBlendshapes: false,
       };
+
       let landmarker;
       try {
         landmarker = await FaceLandmarker.createFromOptions(vision, {
@@ -73,24 +126,66 @@ export function useAttentionTracker({ token, contentId, onUnauthorized }) {
       } catch {
         landmarker = await FaceLandmarker.createFromOptions(vision, options);
       }
+      landmarkerRef.current = landmarker;
+
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: false,
         video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
       });
-
-      landmarkerRef.current = landmarker;
       streamRef.current = stream;
+
+      // The <video> element must already be mounted (ReaderPage always renders it), otherwise no frames arrive.
+      if (!videoRef.current) {
+        throw new Error('רכיב הווידאו לא נמצא בעמוד.');
+      }
       videoRef.current.srcObject = stream;
       await videoRef.current.play();
-      setCameraState('running');
+
       framesRef.current = [];
+      noFaceFramesRef.current = 0;
+      setFaceDetected(false);
+      setLatestScore(null);
+      setLowAttention(false);
+      setProgressText('אוסף נתונים... 0 מתוך 10 שניות');
       setFrameCount(0);
-      intervalRef.current = window.setInterval(captureFrame, SAMPLE_INTERVAL_MS);
+      setCameraState('running');
+
+      if (captureIntervalRef.current) window.clearInterval(captureIntervalRef.current);
+      if (inferenceIntervalRef.current) window.clearInterval(inferenceIntervalRef.current);
+
+      captureIntervalRef.current = window.setInterval(captureFrame, SAMPLE_INTERVAL_MS);
+      // Sliding window: once 10 seconds are collected, score the latest 100 frames every 3 seconds.
+      inferenceIntervalRef.current = window.setInterval(() => {
+        if (busyRef.current || framesRef.current.length < WINDOW_SIZE) return;
+        void inferAttention(framesRef.current.slice(-WINDOW_SIZE));
+      }, INFERENCE_INTERVAL_MS);
     } catch (cameraError) {
       stopCamera();
       setCameraState('error');
       setError(`לא ניתן להפעיל את המצלמה: ${cameraError.message}`);
     }
+  }
+
+  function drawLandmarks(landmarks) {
+    const canvas = overlayRef.current;
+    const video = videoRef.current;
+    if (!canvas || !video) return;
+
+    const context = canvas.getContext('2d');
+    if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+    }
+
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    if (!landmarks) return;
+
+    context.fillStyle = '#b7f35b';
+    landmarks.forEach((point) => {
+      context.beginPath();
+      context.arc(point.x * canvas.width, point.y * canvas.height, 1.3, 0, Math.PI * 2);
+      context.fill();
+    });
   }
 
   function captureFrame() {
@@ -100,9 +195,25 @@ export function useAttentionTracker({ token, contentId, onUnauthorized }) {
 
     const result = landmarker.detectForVideo(video, performance.now());
     const landmarks = result.faceLandmarks?.[0];
-    setFaceDetected(Boolean(landmarks));
     drawLandmarks(landmarks);
-    if (!landmarks) return;
+
+    if (!landmarks) {
+      setFaceDetected(false);
+      noFaceFramesRef.current += 1;
+      if (noFaceFramesRef.current >= NO_FACE_FRAME_LIMIT) {
+        framesRef.current = [];
+        noFaceFramesRef.current = 0;
+        setFrameCount(0);
+        setLatestScore(null);
+        setLowAttention(false);
+        setProgressText('לא זוהו פנים');
+      }
+      return;
+    }
+
+    noFaceFramesRef.current = 0;
+    setFaceDetected(true);
+    setError('');
 
     const frame = new Float32Array(LANDMARK_COUNT * VALUES_PER_POINT);
     landmarks.slice(0, LANDMARK_COUNT).forEach((point, index) => {
@@ -111,84 +222,80 @@ export function useAttentionTracker({ token, contentId, onUnauthorized }) {
       frame[offset + 1] = point.y;
       frame[offset + 2] = point.z;
     });
+
     framesRef.current.push(frame);
+    if (framesRef.current.length > WINDOW_SIZE) {
+      framesRef.current = framesRef.current.slice(-WINDOW_SIZE);
+    }
 
-    if (framesRef.current.length === WINDOW_SIZE) {
-      const windowFrames = framesRef.current;
-      framesRef.current = [];
-      if (busyRef.current) pendingFramesRef.current = windowFrames;
-      else void inferAttention(windowFrames);
-    }
-    setFrameCount(framesRef.current.length);
-  }
-
-  function drawLandmarks(landmarks) {
-    const canvas = overlayRef.current;
-    const video = videoRef.current;
-    if (!canvas || !video) return;
-    const context = canvas.getContext('2d');
-    if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-    }
-    context.clearRect(0, 0, canvas.width, canvas.height);
-    if (!landmarks) return;
-    context.fillStyle = '#b7f35b';
-    for (const point of landmarks) {
-      context.beginPath();
-      context.arc(point.x * canvas.width, point.y * canvas.height, 1.3, 0, Math.PI * 2);
-      context.fill();
-    }
+    const nextCount = framesRef.current.length;
+    setFrameCount(nextCount);
+    setProgressText(getProgressText(nextCount));
   }
 
   async function inferAttention(frames) {
+    if (!sessionRef.current || !frames?.length || busyRef.current) return;
     busyRef.current = true;
+
     try {
-      const values = new Float32Array(WINDOW_SIZE * LANDMARK_COUNT * VALUES_PER_POINT);
+      const values = new Float32Array(frames.length * LANDMARK_COUNT * VALUES_PER_POINT);
       frames.forEach((frame, index) => values.set(frame, index * frame.length));
+
       const tensor = new ort.Tensor('float32', values, [1, WINDOW_SIZE, LANDMARK_COUNT, VALUES_PER_POINT]);
       const outputs = await sessionRef.current.run({ [sessionRef.current.inputNames[0]]: tensor });
-      const output = outputs[sessionRef.current.outputNames[0]];
-      if (output.data.length !== 1 || !Number.isFinite(output.data[0]) || output.data[0] < 0 || output.data[0] > 1) {
-        throw new Error('הפלט חייב להיות ציון יחיד בין 0 ל־1.');
+      const output = outputs[SCORE_OUTPUT];
+      const rawScore = Number(output?.data?.[0]);
+
+      if (!Number.isFinite(rawScore)) {
+        throw new Error('הפלט של המודל אינו תקין.');
       }
-      const score = Math.round(output.data[0] * 100);
-      setLatestScore(score);
-      await api.saveAttentionScore(token, contentId, score);
+
+      const clampedScore = Math.min(1, Math.max(0, rawScore));
+      setLatestScore(clampedScore);
+      setLowAttention(clampedScore < 0.4);
+      onScoreRef.current?.(clampedScore);
     } catch (inferenceError) {
       setError(`חישוב ציון הקשב נכשל: ${inferenceError.message}`);
-      if (inferenceError.status === 401) onUnauthorized();
+      if (inferenceError.status === 401) onUnauthorized?.();
     } finally {
       busyRef.current = false;
-      const nextWindow = pendingFramesRef.current;
-      pendingFramesRef.current = null;
-      if (nextWindow && streamRef.current) void inferAttention(nextWindow);
     }
   }
 
   function stopCamera() {
-    if (intervalRef.current) window.clearInterval(intervalRef.current);
-    intervalRef.current = null;
+    if (captureIntervalRef.current) window.clearInterval(captureIntervalRef.current);
+    if (inferenceIntervalRef.current) window.clearInterval(inferenceIntervalRef.current);
+    captureIntervalRef.current = null;
+    inferenceIntervalRef.current = null;
+
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     landmarkerRef.current?.close();
     landmarkerRef.current = null;
-    if (videoRef.current) videoRef.current.srcObject = null;
+
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+
     const context = overlayRef.current?.getContext('2d');
     if (context && overlayRef.current) {
       context.clearRect(0, 0, overlayRef.current.width, overlayRef.current.height);
     }
+
     framesRef.current = [];
-    pendingFramesRef.current = null;
+    noFaceFramesRef.current = 0;
     setFrameCount(0);
     setFaceDetected(false);
     setCameraState('off');
+    setProgressText('אוסף נתונים... 0 מתוך 10 שניות');
   }
 
+  useEffect(() => {
+    void loadModel();
+  }, []);
+
   useEffect(() => () => {
-    if (intervalRef.current) window.clearInterval(intervalRef.current);
-    streamRef.current?.getTracks().forEach((track) => track.stop());
-    landmarkerRef.current?.close();
+    stopCamera();
   }, []);
 
   return {
@@ -200,6 +307,8 @@ export function useAttentionTracker({ token, contentId, onUnauthorized }) {
     faceDetected,
     frameCount,
     latestScore,
+    lowAttention,
+    progressText,
     error,
     loadModel,
     startCamera,
