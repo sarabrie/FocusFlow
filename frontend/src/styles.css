@@ -145,8 +145,10 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .external-source { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 5px 8px; margin-bottom: 16px; color: #53764e; font-size: 12px; }
 .external-source a { color: #315a3d; text-decoration-thickness: 1px; text-underline-offset: 3px; }
 .external-source span { grid-column: 2; direction: ltr; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #8a958d; font-size: 10px; }
-.source-frame { width: 100%; min-height: min(65vh, 700px); border: 1px solid #e0e7df; border-radius: 5px; background: #fff; }
+.video-frame-wrap { width: 100%; max-width: 100%; }
+.source-frame { display: block; width: 100%; aspect-ratio: 16 / 9; height: auto; border: 1px solid #e0e7df; border-radius: 8px; background: #fff; }
 .frame-note { color: #8a958d; font-size: 10px; }
+.warning-note { color: #8b5b32; background: #fff6ea; border: 1px solid #efd2a8; border-radius: 6px; padding: 10px 12px; }
 .focus-panel { position: sticky; top: 18px; padding: 19px; background: #fff; border: 1px solid #e0e7df; border-radius: 7px; box-shadow: 0 8px 30px rgba(37,55,42,.05); }
 .focus-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .focus-panel-head h2 { margin: 3px 0 0; font-size: 17px; font-weight: 600; }
