@@ -3,6 +3,14 @@
 .env.*
 !.env.example
 
+.env
+frontend/.env.local
+node_modules/
+dist/
+__pycache__/
+*.pyc
+.venv/
+
 # OS / editor files
 .DS_Store
 Thumbs.db
