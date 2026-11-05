@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import React from 'react';
 import {
   ArrowLeft,
@@ -8,6 +8,7 @@ import {
   Upload,
   X,
 } from 'lucide-react';
+import { api } from '../api';
 import { useAttentionTracker } from '../useAttentionTracker';
 
 export function toEmbedUrl(url) {
@@ -47,12 +48,132 @@ export function toEmbedUrl(url) {
   return `https://www.youtube.com/embed/${videoId}`;
 }
 
-export function ReaderPage({ content, token, onBack, onUnauthorized }) {
+export function ReaderPage({ content, token, onBack, onUnauthorized, onViewHistory }) {
   const tracker = useAttentionTracker({ token, contentId: content.id, onUnauthorized });
   const [consent, setConsent] = useState(false);
+  const [sessionId, setSessionId] = useState(null);
+  const [sessionSummary, setSessionSummary] = useState(null);
+  const [sessionMessage, setSessionMessage] = useState('');
+  const [sessionError, setSessionError] = useState('');
+  const [readingPosition, setReadingPosition] = useState(0);
+  const lastReadingRef = useRef({ position: null, score: null });
+  const sessionClosedRef = useRef(false);
   const embedUrl = content.type === 'link' ? toEmbedUrl(content.source) : null;
 
-  useEffect(() => () => tracker.stopCamera(), []);
+  async function startSession() {
+    if (!content?.id) return;
+    setSessionMessage('');
+    setSessionError('');
+
+    try {
+      const created = await api.startSession(token, content.id);
+      setSessionId(created.id);
+      sessionClosedRef.current = false;
+      setSessionMessage('סשן התחיל. מדידות יישמרו בזמן הקריאה.');
+    } catch (requestError) {
+      if (requestError.status === 401) onUnauthorized();
+      else setSessionError('לא הצלחנו להתחיל סשן קריאה.');
+    }
+  }
+
+  async function finishSession() {
+    if (!sessionId) return;
+
+    try {
+      const result = await api.endSession(token, sessionId);
+      sessionClosedRef.current = true;
+      setSessionSummary(result);
+      setSessionMessage('הסשן נסגר והיסטוריית הקריאה עודכנה.');
+      setSessionId(null);
+      tracker.stopCamera();
+    } catch (requestError) {
+      if (requestError.status === 401) onUnauthorized();
+      else setSessionError('שמירת הסשן נכשלה.');
+    }
+  }
+
+  async function sendReading(nextPosition, nextScore) {
+    if (!sessionId || !Number.isFinite(nextPosition) || !Number.isFinite(nextScore)) return;
+
+    const last = lastReadingRef.current;
+    const sameValue = last.position !== null && last.score !== null && Math.abs(nextPosition - last.position) < 1 && Math.abs(nextScore - last.score) < 0.01;
+    if (sameValue) return;
+
+    setSessionMessage('שומר מדידה...');
+    lastReadingRef.current = { position: nextPosition, score: nextScore };
+
+    try {
+      await api.addReading(token, sessionId, {
+        position: Number(nextPosition.toFixed(2)),
+        score: Number(Math.min(Math.max(nextScore, 0), 1).toFixed(4)),
+      });
+      setSessionMessage('');
+    } catch (requestError) {
+      if (requestError.status === 401) onUnauthorized();
+      else {
+        setSessionError('שמירה נכשלה');
+        setSessionMessage('');
+      }
+    }
+  }
+
+  useEffect(() => {
+    const handleScroll = () => {
+      const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+      const percent = maxScroll > 0 ? (window.scrollY / maxScroll) * 100 : 0;
+      setReadingPosition(Math.min(100, Math.max(0, percent)));
+    };
+
+    handleScroll();
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, [content.id]);
+
+  useEffect(() => {
+    if (!sessionId || tracker.latestScore === null || !tracker.faceDetected) return;
+    void sendReading(readingPosition, tracker.latestScore / 100);
+  }, [sessionId, readingPosition, tracker.latestScore, tracker.faceDetected]);
+
+  useEffect(() => {
+    const handlePageHide = () => {
+      if (sessionId && !sessionClosedRef.current) {
+        void api.endSession(token, sessionId).catch(() => {});
+        sessionClosedRef.current = true;
+      }
+    };
+
+    window.addEventListener('pagehide', handlePageHide);
+    return () => {
+      window.removeEventListener('pagehide', handlePageHide);
+      if (sessionId && !sessionClosedRef.current) {
+        void api.endSession(token, sessionId).catch(() => {});
+        sessionClosedRef.current = true;
+      }
+    };
+  }, [sessionId, token]);
+
+  useEffect(() => () => tracker.stopCamera(), [tracker]);
+
+  const handleStartCamera = async () => {
+    setSessionError('');
+    if (!sessionId) {
+      await startSession();
+    }
+
+    if (!sessionId) {
+      setSessionMessage('המצלמה לא הופעלה; אפשר להמשיך לקריאה בלי מדידה.');
+      return;
+    }
+
+    if (tracker.cameraState === 'running') {
+      return;
+    }
+
+    tracker.startCamera();
+    if (tracker.cameraState === 'error') {
+      setSessionMessage('המצלמה לא הופעלה; אפשר להמשיך לקריאה בלי מדידה.');
+    }
+  };
 
   return (
     <main className="reader-shell">
@@ -155,7 +276,17 @@ export function ReaderPage({ content, token, onBack, onUnauthorized }) {
             <small>קלט צפוי: 100 פריימים × 478 נקודות × XYZ; פלט: הסתברות 0–1.</small>
           </div>
 
-          {tracker.cameraState !== 'running' && (
+          {sessionSummary ? (
+            <div className="session-summary-box">
+              <div className="section-kicker">סיכום סשן</div>
+              <strong>{sessionSummary.average_score === null ? '—' : Number(sessionSummary.average_score).toFixed(2)}</strong>
+              <span>ציון ממוצע</span>
+              <small>{sessionSummary.reading_count} מדידות</small>
+              <div className="session-summary-actions">
+                <button type="button" className="button button-dark button-wide" onClick={onViewHistory}>היסטוריה</button>
+              </div>
+            </div>
+          ) : (
             <div className="consent-box">
               <label className="consent-check">
                 <input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} />
@@ -166,14 +297,24 @@ export function ReaderPage({ content, token, onBack, onUnauthorized }) {
               <button
                 type="button"
                 className="button button-dark button-wide"
-                onClick={tracker.startCamera}
+                onClick={async () => {
+                  if (!consent) {
+                    setSessionMessage('כדי להפעיל מצלמה, עליך לאשר שימוש במצלמה.');
+                    return;
+                  }
+                  await handleStartCamera();
+                }}
                 disabled={!consent || !tracker.modelName || tracker.cameraState === 'starting'}
               >
-                {tracker.cameraState === 'starting' ? 'מתחבר...' : 'הפעלת מצלמה'}
+                {sessionId ? 'התחלת סשן' : (tracker.cameraState === 'starting' ? 'מתחבר...' : 'התחל סשן')}
               </button>
+
+              <button type="button" className="button button-outline button-wide" onClick={finishSession} disabled={!sessionId}>סיים סשן</button>
             </div>
           )}
 
+          {sessionMessage && <div className="form-message success-message" role="status">{sessionMessage}</div>}
+          {sessionError && <div className="form-message error-message" role="alert">{sessionError}</div>}
           {tracker.error && <div className="form-message error-message" role="alert">{tracker.error}</div>}
         </aside>
       </div>
