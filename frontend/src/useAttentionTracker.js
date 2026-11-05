@@ -1,9 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 import { FaceLandmarker, FilesetResolver } from '@mediapipe/tasks-vision';
 import * as ort from 'onnxruntime-web';
+import { combineScores, frameFeatures } from './attentionScore';
+import { concentrationScore } from './concentration';
 
 const SAMPLE_INTERVAL_MS = 100;
 const INFERENCE_INTERVAL_MS = 3000;
+// The displayed score is concentration (see concentration.js), refreshed every second.
+const SCORE_INTERVAL_MS = 1000;
+// 60s of per-frame features: blink rate needs a full minute, the other signals use the tail.
+const GEO_WINDOW_SIZE = 600;
+const MIN_GEO_FRAMES = 10;
+const SAVE_INTERVAL_MS = 3000;
+// v4_2.onnx barely reacts to its input (~0.12 for any face); the blended score is shown for comparison only.
+const MODEL_WEIGHT = 0.1;
 const WINDOW_SIZE = 100;
 const NO_FACE_FRAME_LIMIT = 10;
 const LANDMARK_COUNT = 478;
@@ -27,7 +37,15 @@ function getProgressText(frameCount) {
   return `אוסף נתונים... ${steps} מתוך 10 שניות`;
 }
 
-export function useAttentionTracker({ onScore, onUnauthorized }) {
+// Away = the tab is hidden or another window has focus. hasFocus() stays true while the
+// YouTube iframe has focus, so clicking Play inside the player does not count as leaving.
+function isAway() {
+  return document.hidden || !document.hasFocus();
+}
+
+// `active` = whether attention should be measured right now (e.g. the video is playing).
+// While inactive the camera stays on (no new permission prompt) but no frames are analyzed or scored.
+export function useAttentionTracker({ onScore, onTick, active = true }) {
   const videoRef = useRef(null);
   const overlayRef = useRef(null);
   const landmarkerRef = useRef(null);
@@ -35,7 +53,11 @@ export function useAttentionTracker({ onScore, onUnauthorized }) {
   const streamRef = useRef(null);
   const captureIntervalRef = useRef(null);
   const inferenceIntervalRef = useRef(null);
+  const scoreIntervalRef = useRef(null);
   const framesRef = useRef([]);
+  const geoFramesRef = useRef([]);
+  const modelScoreRef = useRef(null);
+  const lastSaveRef = useRef(0);
   const busyRef = useRef(false);
   const noFaceFramesRef = useRef(0);
   const onScoreRef = useRef(onScore);
@@ -46,12 +68,34 @@ export function useAttentionTracker({ onScore, onUnauthorized }) {
   const [frameCount, setFrameCount] = useState(0);
   const [latestScore, setLatestScore] = useState(null);
   const [lowAttention, setLowAttention] = useState(false);
+  const [breakdown, setBreakdown] = useState(null);
   const [progressText, setProgressText] = useState('אוסף נתונים... 0 מתוך 10 שניות');
   const [error, setError] = useState('');
 
+  const onTickRef = useRef(onTick);
+  const activeRef = useRef(active);
+
   useEffect(() => {
     onScoreRef.current = onScore;
-  }, [onScore]);
+    onTickRef.current = onTick;
+  }, [onScore, onTick]);
+
+  // Pausing drops everything collected so far, so time spent paused never counts once measuring resumes.
+  useEffect(() => {
+    activeRef.current = active;
+    if (active) return;
+    framesRef.current = [];
+    geoFramesRef.current = [];
+    modelScoreRef.current = null;
+    noFaceFramesRef.current = 0;
+    setFrameCount(0);
+    setLatestScore(null);
+    setBreakdown(null);
+    setLowAttention(false);
+    setProgressText('אוסף נתונים... 0 מתוך 10 שניות');
+    const canvas = overlayRef.current;
+    canvas?.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height);
+  }, [active]);
 
   async function loadModel() {
     if (modelCache.session) {
@@ -93,11 +137,6 @@ export function useAttentionTracker({ onScore, onUnauthorized }) {
   }
 
   async function startCamera() {
-    if (!sessionRef.current) {
-      setError('לא ניתן להפעיל את המצלמה: המודל עדיין לא נטען.');
-      return;
-    }
-
     if (!navigator?.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
       setCameraState('error');
       setError('המצלמה לא זמינה בדפדפן הזה. השתמשו ב-Chrome או Edge ב-localhost/HTTPS ובחרו לאפשר גישה למצלמה.');
@@ -114,7 +153,8 @@ export function useAttentionTracker({ onScore, onUnauthorized }) {
         baseOptions: { modelAssetPath: FACE_TASK_PATH },
         runningMode: 'VIDEO',
         numFaces: 1,
-        outputFaceBlendshapes: false,
+        outputFaceBlendshapes: true,
+        outputFacialTransformationMatrixes: true,
       };
 
       let landmarker;
@@ -142,9 +182,13 @@ export function useAttentionTracker({ onScore, onUnauthorized }) {
       await videoRef.current.play();
 
       framesRef.current = [];
+      geoFramesRef.current = [];
+      modelScoreRef.current = null;
+      lastSaveRef.current = 0;
       noFaceFramesRef.current = 0;
       setFaceDetected(false);
       setLatestScore(null);
+      setBreakdown(null);
       setLowAttention(false);
       setProgressText('אוסף נתונים... 0 מתוך 10 שניות');
       setFrameCount(0);
@@ -152,11 +196,13 @@ export function useAttentionTracker({ onScore, onUnauthorized }) {
 
       if (captureIntervalRef.current) window.clearInterval(captureIntervalRef.current);
       if (inferenceIntervalRef.current) window.clearInterval(inferenceIntervalRef.current);
+      if (scoreIntervalRef.current) window.clearInterval(scoreIntervalRef.current);
 
       captureIntervalRef.current = window.setInterval(captureFrame, SAMPLE_INTERVAL_MS);
+      scoreIntervalRef.current = window.setInterval(updateScore, SCORE_INTERVAL_MS);
       // Sliding window: once 10 seconds are collected, score the latest 100 frames every 3 seconds.
       inferenceIntervalRef.current = window.setInterval(() => {
-        if (busyRef.current || framesRef.current.length < WINDOW_SIZE) return;
+        if (!activeRef.current || busyRef.current || framesRef.current.length < WINDOW_SIZE) return;
         void inferAttention(framesRef.current.slice(-WINDOW_SIZE));
       }, INFERENCE_INTERVAL_MS);
     } catch (cameraError) {
@@ -188,24 +234,39 @@ export function useAttentionTracker({ onScore, onUnauthorized }) {
     });
   }
 
+  function pushGeoFrame(features) {
+    geoFramesRef.current.push(features);
+    if (geoFramesRef.current.length > GEO_WINDOW_SIZE) {
+      geoFramesRef.current = geoFramesRef.current.slice(-GEO_WINDOW_SIZE);
+    }
+  }
+
   function captureFrame() {
     const video = videoRef.current;
     const landmarker = landmarkerRef.current;
-    if (!video || !landmarker || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
+    if (!video || !landmarker || !activeRef.current) return;
+
+    if (isAway()) {
+      pushGeoFrame({ face: false, head: 0, gaze: 0, closed: false, away: true });
+      return;
+    }
+    if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
 
     const result = landmarker.detectForVideo(video, performance.now());
     const landmarks = result.faceLandmarks?.[0];
     drawLandmarks(landmarks);
+
+    // No face counts as "not looking" for the geometric score, so it keeps going while the face is missing.
+    pushGeoFrame(frameFeatures(result));
 
     if (!landmarks) {
       setFaceDetected(false);
       noFaceFramesRef.current += 1;
       if (noFaceFramesRef.current >= NO_FACE_FRAME_LIMIT) {
         framesRef.current = [];
+        modelScoreRef.current = null;
         noFaceFramesRef.current = 0;
         setFrameCount(0);
-        setLatestScore(null);
-        setLowAttention(false);
         setProgressText('לא זוהו פנים');
       }
       return;
@@ -250,23 +311,40 @@ export function useAttentionTracker({ onScore, onUnauthorized }) {
         throw new Error('הפלט של המודל אינו תקין.');
       }
 
-      const clampedScore = Math.min(1, Math.max(0, rawScore));
-      setLatestScore(clampedScore);
-      setLowAttention(clampedScore < 0.4);
-      onScoreRef.current?.(clampedScore);
+      modelScoreRef.current = Math.min(1, Math.max(0, rawScore));
     } catch (inferenceError) {
       setError(`חישוב ציון הקשב נכשל: ${inferenceError.message}`);
-      if (inferenceError.status === 401) onUnauthorized?.();
     } finally {
       busyRef.current = false;
+    }
+  }
+
+  function updateScore() {
+    if (!activeRef.current || geoFramesRef.current.length < MIN_GEO_FRAMES) return;
+    const concentration = concentrationScore(geoFramesRef.current);
+    // Main score ignores the ONNX model for now; the blended score is kept alongside for comparison.
+    const score = concentration.score;
+    const combined = modelScoreRef.current === null ? null : combineScores(concentration.visual, modelScoreRef.current, MODEL_WEIGHT);
+
+    setLatestScore(score);
+    setLowAttention(score < 0.4);
+    setBreakdown({ ...concentration, model: modelScoreRef.current, combined });
+    onTickRef.current?.(concentration);
+
+    const now = Date.now();
+    if (now - lastSaveRef.current >= SAVE_INTERVAL_MS) {
+      lastSaveRef.current = now;
+      onScoreRef.current?.(score);
     }
   }
 
   function stopCamera() {
     if (captureIntervalRef.current) window.clearInterval(captureIntervalRef.current);
     if (inferenceIntervalRef.current) window.clearInterval(inferenceIntervalRef.current);
+    if (scoreIntervalRef.current) window.clearInterval(scoreIntervalRef.current);
     captureIntervalRef.current = null;
     inferenceIntervalRef.current = null;
+    scoreIntervalRef.current = null;
 
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
@@ -283,9 +361,12 @@ export function useAttentionTracker({ onScore, onUnauthorized }) {
     }
 
     framesRef.current = [];
+    geoFramesRef.current = [];
+    modelScoreRef.current = null;
     noFaceFramesRef.current = 0;
     setFrameCount(0);
     setFaceDetected(false);
+    setBreakdown(null);
     setCameraState('off');
     setProgressText('אוסף נתונים... 0 מתוך 10 שניות');
   }
@@ -308,6 +389,7 @@ export function useAttentionTracker({ onScore, onUnauthorized }) {
     frameCount,
     latestScore,
     lowAttention,
+    breakdown,
     progressText,
     error,
     loadModel,
