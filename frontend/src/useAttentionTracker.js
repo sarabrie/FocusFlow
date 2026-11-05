@@ -43,7 +43,9 @@ function isAway() {
   return document.hidden || !document.hasFocus();
 }
 
-export function useAttentionTracker({ onScore, onTick }) {
+// `active` = whether attention should be measured right now (e.g. the video is playing).
+// While inactive the camera stays on (no new permission prompt) but no frames are analyzed or scored.
+export function useAttentionTracker({ onScore, onTick, active = true }) {
   const videoRef = useRef(null);
   const overlayRef = useRef(null);
   const landmarkerRef = useRef(null);
@@ -71,11 +73,29 @@ export function useAttentionTracker({ onScore, onTick }) {
   const [error, setError] = useState('');
 
   const onTickRef = useRef(onTick);
+  const activeRef = useRef(active);
 
   useEffect(() => {
     onScoreRef.current = onScore;
     onTickRef.current = onTick;
   }, [onScore, onTick]);
+
+  // Pausing drops everything collected so far, so time spent paused never counts once measuring resumes.
+  useEffect(() => {
+    activeRef.current = active;
+    if (active) return;
+    framesRef.current = [];
+    geoFramesRef.current = [];
+    modelScoreRef.current = null;
+    noFaceFramesRef.current = 0;
+    setFrameCount(0);
+    setLatestScore(null);
+    setBreakdown(null);
+    setLowAttention(false);
+    setProgressText('אוסף נתונים... 0 מתוך 10 שניות');
+    const canvas = overlayRef.current;
+    canvas?.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height);
+  }, [active]);
 
   async function loadModel() {
     if (modelCache.session) {
@@ -182,7 +202,7 @@ export function useAttentionTracker({ onScore, onTick }) {
       scoreIntervalRef.current = window.setInterval(updateScore, SCORE_INTERVAL_MS);
       // Sliding window: once 10 seconds are collected, score the latest 100 frames every 3 seconds.
       inferenceIntervalRef.current = window.setInterval(() => {
-        if (busyRef.current || framesRef.current.length < WINDOW_SIZE) return;
+        if (!activeRef.current || busyRef.current || framesRef.current.length < WINDOW_SIZE) return;
         void inferAttention(framesRef.current.slice(-WINDOW_SIZE));
       }, INFERENCE_INTERVAL_MS);
     } catch (cameraError) {
@@ -224,7 +244,7 @@ export function useAttentionTracker({ onScore, onTick }) {
   function captureFrame() {
     const video = videoRef.current;
     const landmarker = landmarkerRef.current;
-    if (!video || !landmarker) return;
+    if (!video || !landmarker || !activeRef.current) return;
 
     if (isAway()) {
       pushGeoFrame({ face: false, head: 0, gaze: 0, closed: false, away: true });
@@ -300,7 +320,7 @@ export function useAttentionTracker({ onScore, onTick }) {
   }
 
   function updateScore() {
-    if (geoFramesRef.current.length < MIN_GEO_FRAMES) return;
+    if (!activeRef.current || geoFramesRef.current.length < MIN_GEO_FRAMES) return;
     const concentration = concentrationScore(geoFramesRef.current);
     // Main score ignores the ONNX model for now; the blended score is kept alongside for comparison.
     const score = concentration.score;

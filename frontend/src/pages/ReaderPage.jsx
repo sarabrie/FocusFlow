@@ -76,9 +76,9 @@ function gaugeLevel(percent) {
   return { tone: 'high', label: 'קשב גבוה' };
 }
 
-function AttentionGauge({ percent }) {
+function AttentionGauge({ percent, paused }) {
   const value = percent ?? 0;
-  const level = gaugeLevel(percent);
+  const level = paused ? { tone: 'idle', label: 'מושהה, הסרטון עצור' } : gaugeLevel(percent);
   const [startX, startY] = gaugePoint(0, GAUGE_RADIUS);
   const [endX, endY] = gaugePoint(100, GAUGE_RADIUS);
   const arcPath = `M ${startX} ${startY} A ${GAUGE_RADIUS} ${GAUGE_RADIUS} 0 1 1 ${endX} ${endY}`;
@@ -170,6 +170,7 @@ export function ReaderPage({ content, token, onBack, onUnauthorized, onViewHisto
   }, [player.playing]);
 
   const tracker = useAttentionTracker({
+    active: measuring,
     onTick: handleTick,
     onScore: async (score) => {
       if (!sessionId || !measuring) return;
@@ -385,7 +386,7 @@ export function ReaderPage({ content, token, onBack, onUnauthorized, onViewHisto
             <span className="live-indicator"><i /> מקומי</span>
           </div>
 
-          <AttentionGauge percent={scorePercent} />
+          <AttentionGauge percent={scorePercent} paused={tracker.cameraState === 'running' && !measuring} />
 
           {intervention === 'remind' && <div className="form-message warning-message" role="status">תזכורת: נראה שהריכוז ירד, הנמכנו את הווליום. הוא יחזור כשתתרכזי שוב.</div>}
           {isVideo && tracker.cameraState === 'running' && !player.playing && intervention !== 'pause' && (
