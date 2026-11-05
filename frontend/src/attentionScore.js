@@ -31,6 +31,25 @@ function blendshapeMap(categories) {
   return map;
 }
 
+// Iris position inside the eye opening, averaged over both eyes: x 0 = one corner, 1 = the other.
+// Landmarks: eye corners 33/133 and 362/263, lids 159/145 and 386/374, iris centers 468 and 473.
+export function irisPosition(landmarks) {
+  if (!landmarks || landmarks.length < 478) return null;
+  const eye = (cornerA, cornerB, upper, lower, iris) => {
+    const width = landmarks[cornerB].x - landmarks[cornerA].x;
+    const height = landmarks[lower].y - landmarks[upper].y;
+    if (Math.abs(width) < 1e-6 || Math.abs(height) < 1e-6) return null;
+    return {
+      x: (landmarks[iris].x - landmarks[cornerA].x) / width,
+      y: (landmarks[iris].y - landmarks[upper].y) / height,
+    };
+  };
+  const left = eye(33, 133, 159, 145, 468);
+  const right = eye(362, 263, 386, 374, 473);
+  if (!left || !right) return null;
+  return { x: (left.x + right.x) / 2, y: (left.y + right.y) / 2 };
+}
+
 export function frameFeatures(result) {
   const landmarks = result?.faceLandmarks?.[0];
   if (!landmarks) return { face: false, head: 0, gaze: 0, closed: false };
@@ -46,7 +65,19 @@ export function frameFeatures(result) {
   const gaze = Math.min(rampDown(sideways, 0.45, 0.8), rampDown(up, 0.45, 0.8), rampDown(down, 0.6, 0.9));
   const closed = ((b.eyeBlinkLeft ?? 0) + (b.eyeBlinkRight ?? 0)) / 2 > 0.5;
 
-  return { face: true, head, gaze, closed, yaw: pose?.yaw, pitch: pose?.pitch };
+  const iris = irisPosition(landmarks);
+
+  return {
+    face: true,
+    head,
+    gaze,
+    closed,
+    yaw: pose?.yaw,
+    pitch: pose?.pitch,
+    irisX: iris?.x,
+    irisY: iris?.y,
+    jaw: b.jawOpen ?? 0,
+  };
 }
 
 // Marks a frame as eyes-closed only when it belongs to a closure of MIN_CLOSED_FRAMES or more.

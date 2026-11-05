@@ -28,6 +28,7 @@ class SessionSummaryResponse(BaseModel):
     id: str
     content_id: str
     content_title: str | None = None
+    content_type: str | None = None
     started_at: datetime
     ended_at: datetime | None = None
     reading_count: int

@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { FaceLandmarker, FilesetResolver } from '@mediapipe/tasks-vision';
 import * as ort from 'onnxruntime-web';
-import { combineScores, frameFeatures, windowScore } from './attentionScore';
+import { combineScores, frameFeatures } from './attentionScore';
+import { concentrationScore } from './concentration';
 
 const SAMPLE_INTERVAL_MS = 100;
 const INFERENCE_INTERVAL_MS = 3000;
-// The displayed score comes from head pose / gaze / eyes over the last 3 seconds, refreshed every second.
+// The displayed score is concentration (see concentration.js), refreshed every second.
 const SCORE_INTERVAL_MS = 1000;
-const GEO_WINDOW_SIZE = 30;
+// 60s of per-frame features: blink rate needs a full minute, the other signals use the tail.
+const GEO_WINDOW_SIZE = 600;
 const MIN_GEO_FRAMES = 10;
 const SAVE_INTERVAL_MS = 3000;
 // v4_2.onnx barely reacts to its input (~0.12 for any face); the blended score is shown for comparison only.
@@ -35,7 +37,13 @@ function getProgressText(frameCount) {
   return `אוסף נתונים... ${steps} מתוך 10 שניות`;
 }
 
-export function useAttentionTracker({ onScore, onUnauthorized }) {
+// Away = the tab is hidden or another window has focus. hasFocus() stays true while the
+// YouTube iframe has focus, so clicking Play inside the player does not count as leaving.
+function isAway() {
+  return document.hidden || !document.hasFocus();
+}
+
+export function useAttentionTracker({ onScore, onTick }) {
   const videoRef = useRef(null);
   const overlayRef = useRef(null);
   const landmarkerRef = useRef(null);
@@ -62,9 +70,12 @@ export function useAttentionTracker({ onScore, onUnauthorized }) {
   const [progressText, setProgressText] = useState('אוסף נתונים... 0 מתוך 10 שניות');
   const [error, setError] = useState('');
 
+  const onTickRef = useRef(onTick);
+
   useEffect(() => {
     onScoreRef.current = onScore;
-  }, [onScore]);
+    onTickRef.current = onTick;
+  }, [onScore, onTick]);
 
   async function loadModel() {
     if (modelCache.session) {
@@ -203,20 +214,30 @@ export function useAttentionTracker({ onScore, onUnauthorized }) {
     });
   }
 
+  function pushGeoFrame(features) {
+    geoFramesRef.current.push(features);
+    if (geoFramesRef.current.length > GEO_WINDOW_SIZE) {
+      geoFramesRef.current = geoFramesRef.current.slice(-GEO_WINDOW_SIZE);
+    }
+  }
+
   function captureFrame() {
     const video = videoRef.current;
     const landmarker = landmarkerRef.current;
-    if (!video || !landmarker || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
+    if (!video || !landmarker) return;
+
+    if (isAway()) {
+      pushGeoFrame({ face: false, head: 0, gaze: 0, closed: false, away: true });
+      return;
+    }
+    if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
 
     const result = landmarker.detectForVideo(video, performance.now());
     const landmarks = result.faceLandmarks?.[0];
     drawLandmarks(landmarks);
 
     // No face counts as "not looking" for the geometric score, so it keeps going while the face is missing.
-    geoFramesRef.current.push(frameFeatures(result));
-    if (geoFramesRef.current.length > GEO_WINDOW_SIZE) {
-      geoFramesRef.current = geoFramesRef.current.slice(-GEO_WINDOW_SIZE);
-    }
+    pushGeoFrame(frameFeatures(result));
 
     if (!landmarks) {
       setFaceDetected(false);
@@ -280,14 +301,15 @@ export function useAttentionTracker({ onScore, onUnauthorized }) {
 
   function updateScore() {
     if (geoFramesRef.current.length < MIN_GEO_FRAMES) return;
-    const geometric = windowScore(geoFramesRef.current);
+    const concentration = concentrationScore(geoFramesRef.current);
     // Main score ignores the ONNX model for now; the blended score is kept alongside for comparison.
-    const score = geometric.score;
-    const combined = modelScoreRef.current === null ? null : combineScores(geometric.score, modelScoreRef.current, MODEL_WEIGHT);
+    const score = concentration.score;
+    const combined = modelScoreRef.current === null ? null : combineScores(concentration.visual, modelScoreRef.current, MODEL_WEIGHT);
 
     setLatestScore(score);
     setLowAttention(score < 0.4);
-    setBreakdown({ ...geometric, model: modelScoreRef.current, combined });
+    setBreakdown({ ...concentration, model: modelScoreRef.current, combined });
+    onTickRef.current?.(concentration);
 
     const now = Date.now();
     if (now - lastSaveRef.current >= SAVE_INTERVAL_MS) {
