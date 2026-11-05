@@ -31,6 +31,12 @@ def calculate_average(readings: list[dict]) -> float | None:
 
 
 async def create_session(payload: SessionCreateRequest, user_id: ObjectId):
+    # An invalid id is "not found", not a server error (ObjectId() would raise InvalidId → 500).
+    if not ObjectId.is_valid(payload.content_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Content not found",
+        )
     content_id = ObjectId(payload.content_id)
     content = await ContentModel.find_for_user(content_id, user_id)
     if content is None:

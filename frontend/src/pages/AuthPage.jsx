@@ -8,6 +8,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { api } from '../api';
+import { passwordProblem } from '../components/AccountDialog';
 
 export function AuthPage({ onAuthenticated }) {
   const [mode, setMode] = useState('login');
@@ -24,6 +25,11 @@ export function AuthPage({ onAuthenticated }) {
 
     try {
       if (mode === 'register') {
+        const problem = passwordProblem(values.password);
+        if (problem) {
+          setError(problem);
+          return;
+        }
         await api.register(values);
         setMode('login');
         setNotice('החשבון נוצר. אפשר להתחבר עכשיו.');
@@ -113,6 +119,7 @@ export function AuthPage({ onAuthenticated }) {
                 required
                 minLength={mode === 'register' ? 8 : undefined}
               />
+              {mode === 'register' && <small className="field-hint">לפחות 8 תווים, עם אות וספרה.</small>}
             </label>
 
             {error && <div className="form-message error-message" role="alert">{error}</div>}

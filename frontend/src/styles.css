@@ -245,6 +245,14 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .nav-tab.active { background: #dce8d9; color: var(--forest); font-weight: 600; }
 /* The active tab already names the screen. */
 .app-nav-view { display: none; }
+.nav-account { margin-right: auto; }
+.nav-account + .nav-logout { margin-right: 0; }
+.field-hint { color: #879188; font-size: 11px; font-weight: 400; }
+.account-section-title { display: flex; align-items: center; gap: 7px; margin: 0; font-size: 14px; font-weight: 600; }
+.account-danger { margin-top: 22px; padding-top: 18px; border-top: 1px solid #f0d6d1; }
+.account-danger p { margin: 0; color: #7b867e; font-size: 12px; line-height: 1.6; }
+.danger-button { color: var(--danger); border-color: #f1c9c0; }
+.danger-solid { color: #fff; background: var(--danger); }
 .nav-logout { margin-right: auto; padding: 7px 12px; border: 1px solid #dce3dc; color: #5d6b62; background: transparent; border-radius: 6px; font: inherit; font-size: 12px; cursor: pointer; }
 .nav-logout:hover { color: var(--danger); border-color: #f1c9c0; background: #fff6f4; }
 

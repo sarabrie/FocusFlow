@@ -28,6 +28,17 @@ export const api = {
     method: 'POST',
     body: JSON.stringify(data),
   }),
+  logout: (token) => request('/api/auth/logout', { token, method: 'POST' }),
+  changePassword: (token, data) => request('/api/auth/password', {
+    token,
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+  deleteAccount: (token, password) => request('/api/auth/me', {
+    token,
+    method: 'DELETE',
+    body: JSON.stringify({ password }),
+  }),
   listContent: (token) => request('/api/content', { token }),
   getContent: (token, id) => request(`/api/content/${encodeURIComponent(id)}`, { token }),
   createContent: (token, data) => request('/api/content', {

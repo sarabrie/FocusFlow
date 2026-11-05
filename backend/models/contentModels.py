@@ -43,6 +43,10 @@ class ContentModel:
 		)
 		return result.deleted_count > 0
 
+	@staticmethod
+	async def delete_all_for_user(user_id: ObjectId):
+		await db.contents.delete_many({"user_id": user_id})
+
 
 class AttentionScoreModel:
 	@staticmethod
@@ -56,3 +60,11 @@ class AttentionScoreModel:
 		result = await db.attention_scores.insert_one(document)
 		document["_id"] = result.inserted_id
 		return document
+
+	@staticmethod
+	async def delete_for_content(content_id: ObjectId, user_id: ObjectId):
+		await db.attention_scores.delete_many({"content_id": content_id, "user_id": user_id})
+
+	@staticmethod
+	async def delete_for_user(user_id: ObjectId):
+		await db.attention_scores.delete_many({"user_id": user_id})
