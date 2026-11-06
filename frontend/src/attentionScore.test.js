@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { combineScores, frameFeatures, headPose, rampDown, windowScore } from './attentionScore';
+import { combineScores, frameFeatures, headPose, mouthOpening, rampDown, windowScore } from './attentionScore';
 
 // Column-major rotation about Y (yaw) by `deg`, as MediaPipe returns it.
 function yawMatrix(deg) {
@@ -38,6 +38,30 @@ describe('headPose', () => {
     expect(Math.abs(headPose(yawMatrix(30)).pitch)).toBeCloseTo(0);
     expect(Math.abs(headPose(pitchMatrix(20)).pitch)).toBeCloseTo(20);
     expect(Math.abs(headPose(pitchMatrix(20)).yaw)).toBeCloseTo(0);
+  });
+});
+
+describe('mouthOpening', () => {
+  // Face 0.4 tall (forehead 10 at y=0.3, chin 152 at y=0.7), lips 13/14 given gap apart.
+  const face = (gap, scale = 1) => {
+    const points = Array.from({ length: 478 }, () => ({ x: 0.5, y: 0.5, z: 0 }));
+    points[10] = { x: 0.5, y: 0.5 - 0.2 * scale, z: 0 };
+    points[152] = { x: 0.5, y: 0.5 + 0.2 * scale, z: 0 };
+    points[13] = { x: 0.5, y: 0.55, z: 0 };
+    points[14] = { x: 0.5, y: 0.55 + gap * scale, z: 0 };
+    return points;
+  };
+
+  it('is the lip gap relative to face height', () => {
+    expect(mouthOpening(face(0.02))).toBeCloseTo(0.05);
+  });
+
+  it('does not change when the face is closer to the camera (bigger)', () => {
+    expect(mouthOpening(face(0.02, 1.5))).toBeCloseTo(mouthOpening(face(0.02)));
+  });
+
+  it('is null without full landmarks', () => {
+    expect(mouthOpening([{ x: 0.5, y: 0.5, z: 0 }])).toBeNull();
   });
 });
 

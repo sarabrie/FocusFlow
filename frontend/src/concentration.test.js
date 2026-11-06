@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { blinksPerMinute, concentrationScore, gazeSpread, headMotion, yawnedRecently } from './concentration';
+import { blinksPerMinute, concentrationScore, gazeSpread, headMotion, mouthCycles, yawnedRecently } from './concentration';
 
-const frame = (overrides = {}) => ({ face: true, head: 1, gaze: 1, closed: false, yaw: 0, pitch: 0, irisX: 0.5, irisY: 0.5, jaw: 0, ...overrides });
+const frame = (overrides = {}) => ({ face: true, head: 1, gaze: 1, closed: false, yaw: 0, pitch: 0, irisX: 0.5, irisY: 0.5, jaw: 0, mouth: 0.005, ...overrides });
+// Mouth opening and closing every `period` frames, like syllables.
+const speaking = (period) => (i) => frame({ mouth: i % period < period / 2 ? 0.05 : 0.005 });
 // Gaze that wanders around the screen, like following a video.
 const moving = (i) => frame({ irisX: 0.5 + 0.04 * Math.sin(i / 3), irisY: 0.5 + 0.03 * Math.cos(i / 4) });
 const series = (n, make) => Array.from({ length: n }, (_, i) => make(i));
@@ -39,6 +41,32 @@ describe('yawnedRecently', () => {
   });
 });
 
+describe('mouthCycles', () => {
+  it('counts repeated open/close cycles as talking', () => {
+    // 50 frames (5s), a syllable every 4 frames → 12 cycles.
+    expect(mouthCycles(series(50, speaking(4)))).toBe(12);
+  });
+
+  it('does not count a closed mouth, a short "yes" or a yawn as talking', () => {
+    expect(mouthCycles(series(50, () => frame()))).toBe(0);
+    expect(mouthCycles(series(50, (i) => frame({ mouth: i >= 20 && i < 24 ? 0.05 : 0.005 })))).toBe(1);
+    expect(mouthCycles(series(50, (i) => frame({ mouth: i >= 10 && i < 35 ? 0.2 : 0.005 })))).toBe(1);
+  });
+
+  it('does not count laughing (mouth cycles while smiling) as talking', () => {
+    const laughing = (i) => ({ ...speaking(4)(i), smile: 0.9 });
+    expect(mouthCycles(series(50, laughing))).toBe(0);
+  });
+
+  it('ignores jitter that never crosses both thresholds', () => {
+    expect(mouthCycles(series(50, (i) => frame({ mouth: i % 2 ? 0.032 : 0.02 })))).toBe(0);
+  });
+
+  it('needs enough frames with a face', () => {
+    expect(mouthCycles(series(10, speaking(4)))).toBeNull();
+  });
+});
+
 describe('headMotion', () => {
   it('measures average rotation change per frame', () => {
     expect(headMotion(series(50, () => frame()))).toBe(0);
@@ -55,7 +83,15 @@ describe('concentrationScore', () => {
     const result = concentrationScore(series(300, () => frame()));
     expect(result.visual).toBe(1);
     expect(result.parts.stare).toBe(0);
-    expect(result.score).toBeCloseTo(0.65);
+    expect(result.score).toBeCloseTo(0.7);
+  });
+
+  it('lowers concentration somewhat (not to zero) while talking', () => {
+    const talking = (i) => ({ ...moving(i), mouth: speaking(4)(i).mouth });
+    const result = concentrationScore(series(300, talking));
+    expect(result.raw.talking).toBe(true);
+    expect(result.parts.talking).toBe(0);
+    expect(result.score).toBeCloseTo(0.8);
   });
 
   it('is zero when away from the tab', () => {

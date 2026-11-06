@@ -14,8 +14,20 @@ const YAWN_MIN_FRAMES = 1 * FPS;
 const RESTLESS_WINDOW = 5 * FPS;
 // A blink is a closure of 1–4 frames (≤0.4s); longer closures are handled as "eyes closed".
 const MAX_BLINK_FRAMES = 4;
+// Talking = the mouth opening and closing again and again; a yawn is one long opening.
+const TALK_WINDOW = 5 * FPS;
+// Two thresholds (hysteresis) so jitter around a single threshold isn't counted as many cycles.
+const MOUTH_OPEN_ABOVE = 0.03;
+const MOUTH_CLOSED_BELOW = 0.015;
+// Cycles per 5s: up to 3 (a short "yes") doesn't count; 8+ (continuous speech) is full talking.
+const TALK_CYCLES_NONE = 3;
+const TALK_CYCLES_FULL = 8;
+export const TALKING_CYCLES = 4;
+// Laughing at the video also opens and closes the mouth, but it means engagement, not distraction.
+// A broad smile measures ~0.95 (MediaPipe sample portrait) vs ~0 for a neutral face.
+const SMILE_ABOVE = 0.5;
 
-const WEIGHTS = { stare: 0.35, blinks: 0.25, yawn: 0.2, restless: 0.2 };
+const WEIGHTS = { stare: 0.3, blinks: 0.2, yawn: 0.15, restless: 0.15, talking: 0.2 };
 
 // 0 below `zero`, 1 above `full`, linear in between.
 export function rampUp(value, zero, full) {
@@ -60,6 +72,28 @@ export function yawnedRecently(frames) {
   return false;
 }
 
+// Open→closed mouth cycles in the last 5 seconds (face present), or null without enough data.
+// An opening during which the person smiles is laughter and isn't counted.
+export function mouthCycles(frames) {
+  const recent = frames.slice(-TALK_WINDOW).filter((f) => f.face && Number.isFinite(f.mouth));
+  if (recent.length < TALK_WINDOW / 2) return null;
+  let open = false;
+  let laughing = false;
+  let cycles = 0;
+  recent.forEach((frame) => {
+    if (!open && frame.mouth > MOUTH_OPEN_ABOVE) {
+      open = true;
+      laughing = false;
+    }
+    if (open && (frame.smile ?? 0) > SMILE_ABOVE) laughing = true;
+    if (open && frame.mouth < MOUTH_CLOSED_BELOW) {
+      open = false;
+      if (!laughing) cycles += 1;
+    }
+  });
+  return cycles;
+}
+
 // Mean head rotation change per frame, in degrees.
 export function headMotion(frames) {
   const posed = frames.slice(-RESTLESS_WINDOW).filter((f) => f.face && Number.isFinite(f.yaw));
@@ -79,6 +113,7 @@ export function concentrationScore(frames) {
   const bpm = blinksPerMinute(frames);
   const yawn = yawnedRecently(frames);
   const motion = headMotion(frames);
+  const cycles = mouthCycles(frames);
 
   // Signals without enough data yet count as neutral (1) so they don't punish the first seconds.
   const parts = {
@@ -86,6 +121,7 @@ export function concentrationScore(frames) {
     blinks: bpm === null ? 1 : rampDown(bpm, 25, 45),
     yawn: yawn ? 0.3 : 1,
     restless: motion === null ? 1 : rampDown(motion, 1.5, 4),
+    talking: cycles === null ? 1 : rampDown(cycles, TALK_CYCLES_NONE, TALK_CYCLES_FULL),
   };
   const engagement = Object.entries(WEIGHTS).reduce((sum, [key, weight]) => sum + weight * parts[key], 0);
 
@@ -94,7 +130,7 @@ export function concentrationScore(frames) {
     visual: visual.score,
     engagement,
     parts,
-    raw: { spread, bpm, yawn, motion },
+    raw: { spread, bpm, yawn, motion, mouthCycles: cycles, talking: cycles !== null && cycles >= TALKING_CYCLES },
     head: visual.head,
     gaze: visual.gaze,
     eyes: visual.eyes,
