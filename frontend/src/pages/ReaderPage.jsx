@@ -414,6 +414,7 @@ export function ReaderPage({ content, token, onBack, onUnauthorized, onViewHisto
               <div><dt>תנועת מבט</dt><dd>{Math.round(tracker.breakdown.parts.stare * 100)}</dd></div>
               <div><dt>מצמוצים/דקה</dt><dd>{tracker.breakdown.raw.bpm === null ? '--' : Math.round(tracker.breakdown.raw.bpm)}</dd></div>
               <div><dt>פיהוק</dt><dd>{tracker.breakdown.raw.yawn ? 'כן' : 'לא'}</dd></div>
+              <div><dt>דיבור</dt><dd>{tracker.breakdown.raw.mouthCycles === null ? '--' : tracker.breakdown.raw.talking ? 'כן' : 'לא'}</dd></div>
               <div><dt>שקט ראש</dt><dd>{Math.round(tracker.breakdown.parts.restless * 100)}</dd></div>
               <div><dt>בטאב</dt><dd>{tracker.breakdown.away ? 'לא' : 'כן'}</dd></div>
             </dl>
@@ -447,7 +448,7 @@ export function ReaderPage({ content, token, onBack, onUnauthorized, onViewHisto
               </span>
             </div>
 
-            <small>ריכוז = קשב חזותי (ראש, מבט, עיניים) × מעורבות (תנועת מבט, מצמוצים, פיהוקים, שקט ראש). מתעדכן כל שנייה{isVideo ? ' ונמדד רק כשהסרטון מנגן' : ''}. {tracker.modelName || 'v4_2.onnx'} מוצג להשוואה בלבד ({tracker.progressText}).</small>
+            <small>ריכוז = קשב חזותי (ראש, מבט, עיניים) × מעורבות (תנועת מבט, מצמוצים, פיהוקים, שקט ראש, דיבור; צחוק לא נחשב דיבור). מתעדכן כל שנייה{isVideo ? ' ונמדד רק כשהסרטון מנגן' : ''}. {tracker.modelName || 'v4_2.onnx'} מוצג להשוואה בלבד ({tracker.progressText}).</small>
           </div>
 
           {sessionSummary ? (

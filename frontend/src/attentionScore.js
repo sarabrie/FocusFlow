@@ -50,6 +50,15 @@ export function irisPosition(landmarks) {
   return { x: (left.x + right.x) / 2, y: (left.y + right.y) / 2 };
 }
 
+// Gap between the inner lips (13 upper, 14 lower) relative to face height (10 forehead, 152 chin),
+// so sitting closer to the camera doesn't look like a wider-open mouth.
+export function mouthOpening(landmarks) {
+  if (!landmarks || landmarks.length <= 152) return null;
+  const faceHeight = Math.hypot(landmarks[152].x - landmarks[10].x, landmarks[152].y - landmarks[10].y);
+  if (faceHeight < 1e-6) return null;
+  return Math.hypot(landmarks[14].x - landmarks[13].x, landmarks[14].y - landmarks[13].y) / faceHeight;
+}
+
 export function frameFeatures(result) {
   const landmarks = result?.faceLandmarks?.[0];
   if (!landmarks) return { face: false, head: 0, gaze: 0, closed: false };
@@ -77,6 +86,8 @@ export function frameFeatures(result) {
     irisX: iris?.x,
     irisY: iris?.y,
     jaw: b.jawOpen ?? 0,
+    mouth: mouthOpening(landmarks),
+    smile: ((b.mouthSmileLeft ?? 0) + (b.mouthSmileRight ?? 0)) / 2,
   };
 }
 
