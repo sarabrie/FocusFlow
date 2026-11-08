@@ -8,6 +8,7 @@ from fastapi.exceptions import RequestValidationError
 from pymongo.errors import PyMongoError
 
 from database import db
+from security import LOGIN_WINDOW
 from routers.authRouters import router as auth_router
 from routers.contentRouters import router as content_router
 from routers.sessionRouters import router as session_router
@@ -22,6 +23,9 @@ async def lifespan(_app: FastAPI):
         await db.users.create_index("email", unique=True)
         # Revoked tokens disappear once they would have expired anyway.
         await db.revoked_tokens.create_index("expires_at", expireAfterSeconds=0)
+        # Failed logins are shared by all instances and expire after the 15-minute rate-limit window.
+        await db.login_failures.create_index("at", expireAfterSeconds=int(LOGIN_WINDOW.total_seconds()))
+        await db.login_failures.create_index("email")
     except PyMongoError as error:
         logger.warning("Could not create indexes: %s", error)
     yield

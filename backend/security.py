@@ -1,9 +1,7 @@
 import logging
 import os
 import secrets
-import time
 import uuid
-from collections import defaultdict, deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
@@ -13,12 +11,16 @@ from bson.errors import InvalidId
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from models.authModels import RevokedTokenModel, UserModel
+from models.authModels import LoginFailureModel, RevokedTokenModel, UserModel
 
 logger = logging.getLogger("focusflow.security")
 
 # No hard-coded fallback: a default secret in public code would let anyone forge tokens.
-# Without JWT_SECRET_KEY a random per-process secret is used, so tokens stop working after a restart.
+# Locally, a missing JWT_SECRET_KEY falls back to a random per-process secret (tokens die on restart).
+# On Cloud Run (K_SERVICE is set automatically) that would give each instance its own secret, so a token
+# issued by one instance is rejected by another — refuse to start instead. The value comes from Secret Manager.
+if not os.getenv("JWT_SECRET_KEY") and os.getenv("K_SERVICE"):
+    raise RuntimeError("JWT_SECRET_KEY must be set on Cloud Run (reference it from Secret Manager).")
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY") or secrets.token_urlsafe(48)
 if not os.getenv("JWT_SECRET_KEY"):
     logger.warning("JWT_SECRET_KEY is not set; using a random secret for this process only.")
@@ -98,32 +100,37 @@ async def get_current_user_id(token: CurrentToken = Depends(get_current_token)) 
     return token.user_id
 
 
+LOGIN_MAX_FAILURES = 5
+LOGIN_WINDOW = timedelta(minutes=15)
+
+
 class LoginRateLimiter:
-    """Blocks an account after too many failed logins in a sliding window (in memory, per process)."""
+    """Blocks an account after too many failed logins in a sliding window.
 
-    def __init__(self, max_failures: int = 5, window_seconds: int = 15 * 60):
+    Failures live in MongoDB, not in process memory: behind a load balancer each request may reach a
+    different instance, and an in-memory count would give an attacker 5 attempts per instance.
+    """
+
+    def __init__(self, max_failures: int = LOGIN_MAX_FAILURES, window: timedelta = LOGIN_WINDOW):
         self.max_failures = max_failures
-        self.window_seconds = window_seconds
-        self._failures: dict[str, deque[float]] = defaultdict(deque)
+        self.window = window
 
-    def _recent(self, key: str) -> deque[float]:
-        failures = self._failures[key]
-        cutoff = time.monotonic() - self.window_seconds
-        while failures and failures[0] < cutoff:
-            failures.popleft()
-        return failures
-
-    def retry_after(self, key: str) -> int:
-        failures = self._recent(key)
+    async def retry_after(self, key: str) -> int:
+        now = datetime.now(timezone.utc)
+        failures = await LoginFailureModel.recent(key, now - self.window)
         if len(failures) < self.max_failures:
             return 0
-        return max(1, int(failures[0] + self.window_seconds - time.monotonic()))
+        # Blocked until the oldest failure that still counts leaves the window.
+        oldest = failures[-self.max_failures]
+        if oldest.tzinfo is None:
+            oldest = oldest.replace(tzinfo=timezone.utc)
+        return max(1, int((oldest + self.window - now).total_seconds()))
 
-    def record_failure(self, key: str) -> None:
-        self._recent(key).append(time.monotonic())
+    async def record_failure(self, key: str) -> None:
+        await LoginFailureModel.record(key, datetime.now(timezone.utc))
 
-    def reset(self, key: str) -> None:
-        self._failures.pop(key, None)
+    async def reset(self, key: str) -> None:
+        await LoginFailureModel.clear(key)
 
 
 login_limiter = LoginRateLimiter()

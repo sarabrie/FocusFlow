@@ -46,6 +46,23 @@ class UserModel:
 		await db.users.delete_one({"_id": user_id})
 
 
+class LoginFailureModel:
+	# Stored in MongoDB (not process memory) so every server instance behind the load balancer sees the
+	# same count. A TTL index on "at" (see main.py) deletes each failure once it leaves the window.
+	@staticmethod
+	async def record(email: str, at: datetime):
+		await db.login_failures.insert_one({"email": email, "at": at})
+
+	@staticmethod
+	async def recent(email: str, since: datetime) -> list[datetime]:
+		cursor = db.login_failures.find({"email": email, "at": {"$gte": since}}, {"at": 1}).sort("at", 1)
+		return [document["at"] async for document in cursor]
+
+	@staticmethod
+	async def clear(email: str):
+		await db.login_failures.delete_many({"email": email})
+
+
 class RevokedTokenModel:
 	# A TTL index on expires_at (see main.py) removes entries once the token would have expired anyway.
 	@staticmethod

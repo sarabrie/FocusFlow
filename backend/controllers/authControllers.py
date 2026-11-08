@@ -43,7 +43,7 @@ async def register_user(user: UserRegister):
 
 async def login_user(user: UserLogin):
 	email = user.email.lower()
-	retry_after = login_limiter.retry_after(email)
+	retry_after = await login_limiter.retry_after(email)
 	if retry_after:
 		raise HTTPException(
 			status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -54,13 +54,13 @@ async def login_user(user: UserLogin):
 	db_user = await UserModel.find_by_email(email)
 	password_ok = pwd_context.verify(user.password, db_user["password"] if db_user else DUMMY_HASH)
 	if not db_user or not password_ok:
-		login_limiter.record_failure(email)
+		await login_limiter.record_failure(email)
 		raise HTTPException(
 			status_code=status.HTTP_401_UNAUTHORIZED,
 			detail="Invalid email or password",
 		)
 
-	login_limiter.reset(email)
+	await login_limiter.reset(email)
 	return {
 		"id": str(db_user["_id"]),
 		"email": db_user["email"],
