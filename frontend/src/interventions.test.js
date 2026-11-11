@@ -33,6 +33,10 @@ describe('interventions', () => {
     expect(run(repeat(6, { score: 0, away: true }))).toEqual(['5s:pause']);
   });
 
+  it('pauses after 5s of a face that looks like a photo', () => {
+    expect(run(repeat(6, { score: 0, photo: true }))).toEqual(['5s:pause']);
+  });
+
   it('does not repeat the reminder within the cooldown', () => {
     const inputs = [...repeat(6, { score: 0.4 }), ...repeat(3, { score: 0.8 }), ...repeat(8, { score: 0.4 })];
     expect(run(inputs)).toEqual(['5s:remind', '8s:restore']);

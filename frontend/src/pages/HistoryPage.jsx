@@ -141,7 +141,8 @@ function SessionDetail({ session, onClose }) {
   );
 }
 
-export function HistoryPage({ token, onBack, onUnauthorized }) {
+// `sessionId` comes from the URL (#/history/<id>), so back/forward moves between the list and a session.
+export function HistoryPage({ token, sessionId, onOpenSession, onCloseSession, onBack, onUnauthorized }) {
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -163,22 +164,36 @@ export function HistoryPage({ token, onBack, onUnauthorized }) {
 
   useEffect(() => { loadSessions(); }, [token]);
 
-  async function openSession(sessionId) {
+  useEffect(() => {
+    if (!sessionId) {
+      setSelectedSession(null);
+      return undefined;
+    }
+    if (selectedSession?.id === sessionId) return undefined;
+    let cancelled = false;
     setOpeningId(sessionId);
     setError('');
-    try {
-      setSelectedSession(await api.getSession(token, sessionId));
-      window.scrollTo({ top: 0 });
-    } catch (requestError) {
-      if (requestError.status === 401) onUnauthorized();
-      else setError('לא הצלחנו לפתוח את הסשן.');
-    } finally {
-      setOpeningId(null);
-    }
+    api.getSession(token, sessionId)
+      .then((detail) => { if (!cancelled) setSelectedSession(detail); })
+      .catch((requestError) => {
+        if (cancelled) return;
+        if (requestError.status === 401) onUnauthorized();
+        else {
+          setError('לא הצלחנו לפתוח את הסשן.');
+          onCloseSession();
+        }
+      })
+      .finally(() => { if (!cancelled) setOpeningId(null); });
+    return () => { cancelled = true; };
+  }, [sessionId, token]);
+
+  // Opening a session only changes the URL; the effect above loads it (also on back/forward).
+  function openSession(id) {
+    onOpenSession(id);
   }
 
-  if (selectedSession) {
-    return <SessionDetail session={selectedSession} onClose={() => setSelectedSession(null)} />;
+  if (sessionId && selectedSession?.id === sessionId) {
+    return <SessionDetail session={selectedSession} onClose={onCloseSession} />;
   }
 
   const summary = summarizeSessions(sessions);
@@ -207,7 +222,7 @@ export function HistoryPage({ token, onBack, onUnauthorized }) {
           <div className="empty-symbol"><FileText size={24} /></div>
           <div className="section-kicker">עדיין אין מה לראות</div>
           <h2>אין סשנים עדיין.</h2>
-          <p>פתחי סרטון מהספרייה והתחילי סשן. הוא יופיע כאן כשתסיימי.</p>
+          <p>פתחו סרטון מהספרייה והתחילו סשן. הוא יופיע כאן בסיום.</p>
         </div>
       ) : (
         <>

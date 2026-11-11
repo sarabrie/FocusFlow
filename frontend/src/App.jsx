@@ -1,11 +1,13 @@
 ﻿import React from 'react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { LoaderCircle } from 'lucide-react';
 import { AuthPage } from './pages/AuthPage';
 import { HistoryPage } from './pages/HistoryPage';
 import { LibraryPage } from './pages/LibraryPage';
 import { ReaderPage } from './pages/ReaderPage';
 import { AccountDialog } from './components/AccountDialog';
 import { api } from './api';
+import { useRoute } from './router';
 
 function readSavedSession() {
   try {
@@ -34,18 +36,43 @@ function AppNav({ currentScreen, onLibrary, onHistory, onAccount, onSignOut }) {
       </div>
       <div className="app-nav-view">{titleMap[currentScreen] || 'FocusFlow'}</div>
       <button type="button" className="nav-tab nav-account" onClick={onAccount}>החשבון שלי</button>
-      <button type="button" className="nav-logout" onClick={onSignOut}>התנתק</button>
+      <button type="button" className="nav-logout" onClick={onSignOut}>התנתקות</button>
     </nav>
   );
 }
 
 export default function App() {
   const [session, setSession] = useState(readSavedSession);
-  const [screen, setScreen] = useState('library');
+  // The current screen lives in the URL (#/...), so back/forward and refresh work.
+  const { route, navigate, replace } = useRoute();
+  const { screen } = route;
+  // Content opened from the library is kept here; after a refresh or back/forward it is fetched by id.
   const [activeContent, setActiveContent] = useState(null);
+  const [contentError, setContentError] = useState('');
   const [showAccount, setShowAccount] = useState(false);
 
   const authToken = useMemo(() => session?.access_token || '', [session]);
+
+  function openContent(content) {
+    setActiveContent(content);
+    navigate({ screen: 'reader', contentId: content.id });
+  }
+
+  useEffect(() => {
+    if (!authToken || screen !== 'reader' || activeContent?.id === route.contentId) return;
+    let cancelled = false;
+    setContentError('');
+    api.getContent(authToken, route.contentId)
+      .then((content) => { if (!cancelled) setActiveContent(content); })
+      .catch((requestError) => {
+        if (cancelled) return;
+        if (requestError.status === 401) signOut();
+        // Deleted or someone else's content: drop this entry instead of leaving a dead page in history.
+        else if (requestError.status === 404) replace({ screen: 'library' });
+        else setContentError(requestError.message);
+      });
+    return () => { cancelled = true; };
+  }, [authToken, screen, route.contentId]);
 
   // Local sign-out only: used when the server already rejected the token (401) or the account is gone.
   function signOut() {
@@ -53,10 +80,10 @@ export default function App() {
     setSession(null);
     setActiveContent(null);
     setShowAccount(false);
-    setScreen('library');
+    replace({ screen: 'library' });
   }
 
-  // "התנתק": also revokes the token on the server, so a copied token stops working too.
+  // "התנתקות": also revokes the token on the server, so a copied token stops working too.
   function logout() {
     void api.logout(authToken).catch(() => {});
     signOut();
@@ -80,14 +107,24 @@ export default function App() {
   }
 
   const renderScreen = () => {
-    if (screen === 'reader' && activeContent) {
+    if (screen === 'reader') {
+      if (activeContent?.id !== route.contentId) {
+        return (
+          <main className="history-shell">
+            {contentError
+              ? <div className="form-message error-message" role="alert">{contentError}</div>
+              : <div className="loading-state"><LoaderCircle className="spin" size={22} /> טוענים את התוכן...</div>}
+          </main>
+        );
+      }
       return (
         <ReaderPage
+          key={activeContent.id}
           content={activeContent}
           token={authToken}
-          onBack={() => { setScreen('library'); setActiveContent(null); }}
+          onBack={() => navigate({ screen: 'library' })}
           onUnauthorized={signOut}
-          onViewHistory={() => setScreen('history')}
+          onViewHistory={() => navigate({ screen: 'history' })}
         />
       );
     }
@@ -96,9 +133,11 @@ export default function App() {
       return (
         <HistoryPage
           token={authToken}
-          onBack={() => setScreen('library')}
+          sessionId={route.sessionId || null}
+          onOpenSession={(sessionId) => navigate({ screen: 'history', sessionId })}
+          onCloseSession={() => navigate({ screen: 'history' })}
+          onBack={() => navigate({ screen: 'library' })}
           onUnauthorized={signOut}
-          onOpenContent={(content) => { setActiveContent(content); setScreen('reader'); }}
         />
       );
     }
@@ -107,10 +146,9 @@ export default function App() {
       <LibraryPage
         token={authToken}
         user={session}
-        onOpen={(content) => { setActiveContent(content); setScreen('reader'); }}
+        onOpen={openContent}
         onSignOut={logout}
         onUnauthorized={signOut}
-        onViewHistory={() => setScreen('history')}
       />
     );
   };
@@ -119,8 +157,8 @@ export default function App() {
     <>
       <AppNav
         currentScreen={screen}
-        onLibrary={() => { setScreen('library'); setActiveContent(null); }}
-        onHistory={() => setScreen('history')}
+        onLibrary={() => navigate({ screen: 'library' })}
+        onHistory={() => navigate({ screen: 'history' })}
         onAccount={() => setShowAccount(true)}
         onSignOut={logout}
       />

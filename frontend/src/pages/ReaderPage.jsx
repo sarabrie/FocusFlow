@@ -126,8 +126,7 @@ export function ReaderPage({ content, token, onBack, onUnauthorized, onViewHisto
   const [readingPosition, setReadingPosition] = useState(0);
   const lastReadingRef = useRef({ position: null, score: null });
   const sessionClosedRef = useRef(false);
-  const [intervention, setIntervention] = useState(null);
-  const iframeRef = useRef(null);
+  const [intervention, setIntervention] = useState(null);  const iframeRef = useRef(null);
   const interventionRef = useRef(initialInterventionState);
   // Per-session counts for the summary; refs because they don't need to re-render anything.
   const sessionStatsRef = useRef({ startedAt: null, reminders: 0, pauses: 0 });
@@ -143,6 +142,7 @@ export function ReaderPage({ content, token, onBack, onUnauthorized, onViewHisto
       now: Date.now(),
       score: concentration.score,
       away: concentration.away,
+      photo: concentration.photo,
       playing: player.playing,
     });
     interventionRef.current = state;
@@ -313,12 +313,6 @@ export function ReaderPage({ content, token, onBack, onUnauthorized, onViewHisto
   const showLowAttention = tracker.lowAttention && sessionId && measuring;
   const scorePercent = tracker.latestScore === null ? null : Math.round(tracker.latestScore * 100);
 
-  useEffect(() => {
-    if (tracker.modelState === 'error') {
-      setSessionMessage('מודל הקשב לא נטען. אפשר להמשיך לקריאה בלי מדידה.');
-    }
-  }, [tracker.modelState]);
-
   return (
     <main className="reader-shell">
       <header className="reader-topbar">
@@ -364,7 +358,7 @@ export function ReaderPage({ content, token, onBack, onUnauthorized, onViewHisto
                     {intervention === 'pause' && (
                       <div className="focus-overlay" role="alert">
                         <strong>הסרטון נעצר</strong>
-                        <span>נראה שהריכוז ירד לזמן ממושך. קחי נשימה וחזרי כשאת מוכנה.</span>
+                        <span>נראה שהריכוז ירד לזמן ממושך. קחו נשימה, וחזרו כשנוח לכם.</span>
                         <button type="button" className="button button-lime" onClick={() => { setIntervention(null); player.play(); }}>המשך צפייה</button>
                       </div>
                     )}
@@ -391,7 +385,7 @@ export function ReaderPage({ content, token, onBack, onUnauthorized, onViewHisto
 
           <AttentionGauge percent={scorePercent} paused={tracker.cameraState === 'running' && !measuring} />
 
-          {intervention === 'remind' && <div className="form-message warning-message" role="status">תזכורת: נראה שהריכוז ירד, הנמכנו את הווליום. הוא יחזור כשתתרכזי שוב.</div>}
+          {intervention === 'remind' && <div className="form-message warning-message" role="status">תזכורת: נראה שהריכוז ירד, הנמכנו את הווליום. הוא יחזור כשהריכוז יחזור.</div>}
           {isVideo && tracker.cameraState === 'running' && !player.playing && intervention !== 'pause' && (
             <div className="form-message" role="status">הסרטון לא מנגן, המדידה מושהית.</div>
           )}
@@ -399,9 +393,7 @@ export function ReaderPage({ content, token, onBack, onUnauthorized, onViewHisto
           {tracker.breakdown && (
             <dl className="score-compare">
               <div className="is-primary"><dt>ריכוז</dt><dd>{scorePercent}%</dd></div>
-              <div><dt>קשב חזותי (מסתכלת על המסך)</dt><dd>{Math.round(tracker.breakdown.visual * 100)}%</dd></div>
-              <div><dt>משולב (90% קשב חזותי + 10% מודל)</dt><dd>{tracker.breakdown.combined === null ? 'ממתין למודל' : `${Math.round(tracker.breakdown.combined * 100)}%`}</dd></div>
-              <div><dt>מודל ONNX לבד</dt><dd>{tracker.breakdown.model === null ? 'ממתין' : `${Math.round(tracker.breakdown.model * 100)}%`}</dd></div>
+              <div><dt>קשב חזותי (מבט אל המסך)</dt><dd>{Math.round(tracker.breakdown.visual * 100)}%</dd></div>
             </dl>
           )}
 
@@ -414,10 +406,9 @@ export function ReaderPage({ content, token, onBack, onUnauthorized, onViewHisto
               <div><dt>תנועת מבט</dt><dd>{Math.round(tracker.breakdown.parts.stare * 100)}</dd></div>
               <div><dt>מצמוצים/דקה</dt><dd>{tracker.breakdown.raw.bpm === null ? '--' : Math.round(tracker.breakdown.raw.bpm)}</dd></div>
               <div><dt>פיהוק</dt><dd>{tracker.breakdown.raw.yawn ? 'כן' : 'לא'}</dd></div>
-              <div><dt>דיבור</dt><dd>{tracker.breakdown.raw.mouthCycles === null ? '--' : tracker.breakdown.raw.talking ? 'כן' : 'לא'}</dd></div>
+              <div><dt>דיבור</dt><dd>{tracker.breakdown.raw.mouthCycles === null ? '--' : `${tracker.breakdown.raw.talking ? 'כן' : 'לא'} (${tracker.breakdown.raw.mouthCycles})`}</dd></div>
               <div><dt>שקט ראש</dt><dd>{Math.round(tracker.breakdown.parts.restless * 100)}</dd></div>
-              <div><dt>בטאב</dt><dd>{tracker.breakdown.away ? 'לא' : 'כן'}</dd></div>
-            </dl>
+              <div><dt>בטאב</dt><dd>{tracker.breakdown.away ? 'לא' : 'כן'}</dd></div>            </dl>
           )}
 
           <div className="capture-status">
@@ -442,13 +433,10 @@ export function ReaderPage({ content, token, onBack, onUnauthorized, onViewHisto
 
           <div className="model-picker">
             <div className="model-picker-title">
-              <span>מודל קשב</span>
-              <span className={`model-state ${tracker.modelState}`}>
-                {tracker.modelState === 'ready' ? <><Check size={13} /> מוכן</> : tracker.modelState === 'loading' ? 'טוען...' : 'שגיאה'}
-              </span>
+              <span>איך מחושב הריכוז</span>
             </div>
 
-            <small>ריכוז = קשב חזותי (ראש, מבט, עיניים) × מעורבות (תנועת מבט, מצמוצים, פיהוקים, שקט ראש, דיבור; צחוק לא נחשב דיבור). מתעדכן כל שנייה{isVideo ? ' ונמדד רק כשהסרטון מנגן' : ''}. {tracker.modelName || 'v4_2.onnx'} מוצג להשוואה בלבד ({tracker.progressText}).</small>
+            <small>ריכוז = קשב חזותי (ראש, מבט, עיניים) × מעורבות (תנועת מבט, מצמוצים, פיהוקים, שקט ראש) × דיבור (דיבור רציף מוריד את הריכוז; מילה קצרה או צחוק לא נחשבים). מתעדכן כל שנייה{isVideo ? ' ונמדד רק כשהסרטון מנגן' : ''}. הכל מחושב בדפדפן, בלי לשלוח את הווידאו מהמצלמה.</small>
           </div>
 
           {sessionSummary ? (
@@ -472,7 +460,7 @@ export function ReaderPage({ content, token, onBack, onUnauthorized, onViewHisto
               <label className="consent-check">
                 <input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} />
                 <span className="custom-check"><Check size={13} /></span>
-                <span>אני מאשר להפעיל את המצלמה לצורך מדידת קשב</span>
+                <span>אישור להפעלת המצלמה לצורך מדידת קשב</span>
               </label>
 
               <button
@@ -489,10 +477,10 @@ export function ReaderPage({ content, token, onBack, onUnauthorized, onViewHisto
                 }}
                 disabled={!consent || tracker.cameraState === 'starting' || tracker.cameraState === 'running'}
               >
-                {tracker.cameraState === 'starting' ? 'מתחבר...' : sessionId ? 'הפעלת מצלמה' : 'התחל סשן'}
+                {tracker.cameraState === 'starting' ? 'מתחברים...' : sessionId ? 'הפעלת מצלמה' : 'התחלת סשן'}
               </button>
 
-              <button type="button" className="button button-outline button-wide" onClick={finishSession} disabled={!sessionId}>סיים סשן</button>
+              <button type="button" className="button button-outline button-wide" onClick={finishSession} disabled={!sessionId}>סיום סשן</button>
             </div>
           )}
 

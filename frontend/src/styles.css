@@ -214,9 +214,6 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .camera-stop { position: absolute; z-index: 2; bottom: 8px; left: 8px; display: inline-flex; align-items: center; gap: 5px; padding: 6px 9px; color: #fff; background: rgba(20,31,24,.76); border: 0; border-radius: 4px; font-size: 10px; cursor: pointer; }
 .model-picker { display: grid; gap: 7px; padding: 13px 0; border-bottom: 1px solid #e7ece6; }
 .model-picker-title { display: flex; justify-content: space-between; align-items: center; color: #58675c; font-size: 10px; font-weight: 600; }
-.model-state { display: inline-flex; align-items: center; gap: 3px; color: #909b92; font-weight: 400; }
-.model-state.ready { color: #4b8054; }
-.model-state.error { color: var(--danger); }
 .file-button { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 9px 10px; border: 1px dashed #c7d2c5; border-radius: 5px; color: #536b55; background: #f8faf6; font-size: 10px; cursor: pointer; }
 .file-button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-button input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; clip-path: inset(50%); }
