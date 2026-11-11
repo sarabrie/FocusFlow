@@ -127,9 +127,3 @@ export function windowScore(frames) {
     eyes: totals.face ? totals.eyes / faceN : 0,
   };
 }
-
-export function combineScores(geometric, model, modelWeight) {
-  if (geometric === null) return null;
-  if (model === null || !Number.isFinite(model)) return geometric;
-  return (1 - modelWeight) * geometric + modelWeight * model;
-}

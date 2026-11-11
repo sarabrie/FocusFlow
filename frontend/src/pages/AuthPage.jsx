@@ -14,14 +14,12 @@ export function AuthPage({ onAuthenticated }) {
   const [mode, setMode] = useState('login');
   const [values, setValues] = useState({ email: '', password: '', display_name: '' });
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
 
   async function submit(event) {
     event.preventDefault();
     setBusy(true);
     setError('');
-    setNotice('');
 
     try {
       if (mode === 'register') {
@@ -31,8 +29,9 @@ export function AuthPage({ onAuthenticated }) {
           return;
         }
         await api.register(values);
-        setMode('login');
-        setNotice('החשבון נוצר. אפשר להתחבר עכשיו.');
+        // Signs in right away with the same details, so a new user lands in the library.
+        const result = await api.login({ email: values.email, password: values.password });
+        onAuthenticated(result);
       } else {
         const result = await api.login(values);
         onAuthenticated(result);
@@ -71,14 +70,14 @@ export function AuthPage({ onAuthenticated }) {
             <button
               type="button"
               className={mode === 'login' ? 'selected' : ''}
-              onClick={() => { setMode('login'); setError(''); setNotice(''); }}
+              onClick={() => { setMode('login'); setError(''); }}
             >
               התחברות
             </button>
             <button
               type="button"
               className={mode === 'register' ? 'selected' : ''}
-              onClick={() => { setMode('register'); setError(''); setNotice(''); }}
+              onClick={() => { setMode('register'); setError(''); }}
             >
               הרשמה
             </button>
@@ -123,7 +122,6 @@ export function AuthPage({ onAuthenticated }) {
             </label>
 
             {error && <div className="form-message error-message" role="alert">{error}</div>}
-            {notice && <div className="form-message success-message" role="status">{notice}</div>}
 
             <button className="button button-dark button-wide" type="submit" disabled={busy}>
               {busy ? <LoaderCircle className="spin" size={17} /> : null}

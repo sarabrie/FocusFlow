@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { combineScores, frameFeatures, headPose, mouthOpening, rampDown, windowScore } from './attentionScore';
+import { frameFeatures, headPose, mouthOpening, rampDown, windowScore } from './attentionScore';
 
 // Column-major rotation about Y (yaw) by `deg`, as MediaPipe returns it.
 function yawMatrix(deg) {
@@ -115,15 +115,5 @@ describe('windowScore', () => {
 
   it('returns null for an empty window', () => {
     expect(windowScore([])).toBeNull();
-  });
-});
-
-describe('combineScores', () => {
-  it('uses the geometric score alone until the model has a score', () => {
-    expect(combineScores(0.8, null, 0.1)).toBe(0.8);
-  });
-
-  it('blends in the model with a small weight', () => {
-    expect(combineScores(0.8, 0.2, 0.1)).toBeCloseTo(0.74);
   });
 });

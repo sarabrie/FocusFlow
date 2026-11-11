@@ -8,6 +8,8 @@ export const REMIND_AFTER_MS = 5000;
 export const PAUSE_AFTER_MS = 15000;
 // Leaving the tab/window while the video plays is the clearest sign, so it pauses sooner.
 export const AWAY_PAUSE_AFTER_MS = 5000;
+// A face with no blinks (see looksLikePhoto) is likely a photo; if it persists, the video pauses.
+export const PHOTO_PAUSE_AFTER_MS = 5000;
 export const RECOVER_AFTER_MS = 2000;
 export const REMIND_COOLDOWN_MS = 20000;
 
@@ -15,16 +17,17 @@ export const initialInterventionState = {
   lowSince: null,
   veryLowSince: null,
   awaySince: null,
+  photoSince: null,
   recoveredSince: null,
   ducked: false,
   lastReminderAt: -Infinity,
 };
 
 function reset(state) {
-  return { ...state, lowSince: null, veryLowSince: null, awaySince: null, recoveredSince: null };
+  return { ...state, lowSince: null, veryLowSince: null, awaySince: null, photoSince: null, recoveredSince: null };
 }
 
-export function step(state, { now, score, away, playing }) {
+export function step(state, { now, score, away, photo = false, playing }) {
   const actions = [];
 
   if (!playing || score === null) {
@@ -35,14 +38,16 @@ export function step(state, { now, score, away, playing }) {
   const next = {
     ...state,
     awaySince: away ? state.awaySince ?? now : null,
+    photoSince: photo ? state.photoSince ?? now : null,
     veryLowSince: score < PAUSE_BELOW ? state.veryLowSince ?? now : null,
     lowSince: score < REMIND_BELOW ? state.lowSince ?? now : null,
     recoveredSince: score >= RECOVER_ABOVE ? state.recoveredSince ?? now : null,
   };
 
   const awayTooLong = next.awaySince !== null && now - next.awaySince >= AWAY_PAUSE_AFTER_MS;
+  const photoTooLong = next.photoSince !== null && now - next.photoSince >= PHOTO_PAUSE_AFTER_MS;
   const lowTooLong = next.veryLowSince !== null && now - next.veryLowSince >= PAUSE_AFTER_MS;
-  if (awayTooLong || lowTooLong) {
+  if (awayTooLong || photoTooLong || lowTooLong) {
     if (next.ducked) actions.push('restore');
     actions.push('pause');
     return { state: { ...reset(next), ducked: false }, actions };

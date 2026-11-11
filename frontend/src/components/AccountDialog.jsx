@@ -89,7 +89,7 @@ export function AccountDialog({ token, onClose, onTokenChanged, onAccountDeleted
 
         <form className="add-form account-danger" onSubmit={deleteAccount}>
           <h3 className="account-section-title"><Trash2 size={16} /> מחיקת חשבון</h3>
-          <p>מוחק לצמיתות את החשבון, את כל התכנים, הסשנים והמדידות. אי אפשר לבטל.</p>
+          <p>הפעולה מוחקת לצמיתות את החשבון, את כל התכנים, הסשנים והמדידות. אי אפשר לבטל.</p>
           {!confirmDelete ? (
             <div className="modal-actions">
               <button type="button" className="button button-outline danger-button" onClick={() => setConfirmDelete(true)}>מחיקת החשבון</button>
@@ -97,7 +97,7 @@ export function AccountDialog({ token, onClose, onTokenChanged, onAccountDeleted
           ) : (
             <>
               <label>
-                הקלידי סיסמה לאישור
+                הקלידו סיסמה לאישור
                 <input type="password" autoComplete="current-password" value={deletePassword} onChange={(event) => setDeletePassword(event.target.value)} required />
               </label>
               <div className="modal-actions">
