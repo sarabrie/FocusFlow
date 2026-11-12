@@ -22,6 +22,8 @@ async def lifespan(_app: FastAPI):
         await db.users.create_index("email", unique=True)
         # Revoked tokens disappear once they would have expired anyway.
         await db.revoked_tokens.create_index("expires_at", expireAfterSeconds=0)
+        # Failed-login counters disappear when their window ends.
+        await db.login_failures.create_index("expires_at", expireAfterSeconds=0)
     except PyMongoError as error:
         logger.warning("Could not create indexes: %s", error)
     yield

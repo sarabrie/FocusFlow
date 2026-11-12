@@ -1,9 +1,7 @@
 import logging
 import os
 import secrets
-import time
 import uuid
-from collections import defaultdict, deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
@@ -96,34 +94,3 @@ async def get_current_token(
 
 async def get_current_user_id(token: CurrentToken = Depends(get_current_token)) -> ObjectId:
     return token.user_id
-
-
-class LoginRateLimiter:
-    """Blocks an account after too many failed logins in a sliding window (in memory, per process)."""
-
-    def __init__(self, max_failures: int = 5, window_seconds: int = 15 * 60):
-        self.max_failures = max_failures
-        self.window_seconds = window_seconds
-        self._failures: dict[str, deque[float]] = defaultdict(deque)
-
-    def _recent(self, key: str) -> deque[float]:
-        failures = self._failures[key]
-        cutoff = time.monotonic() - self.window_seconds
-        while failures and failures[0] < cutoff:
-            failures.popleft()
-        return failures
-
-    def retry_after(self, key: str) -> int:
-        failures = self._recent(key)
-        if len(failures) < self.max_failures:
-            return 0
-        return max(1, int(failures[0] + self.window_seconds - time.monotonic()))
-
-    def record_failure(self, key: str) -> None:
-        self._recent(key).append(time.monotonic())
-
-    def reset(self, key: str) -> None:
-        self._failures.pop(key, None)
-
-
-login_limiter = LoginRateLimiter()
