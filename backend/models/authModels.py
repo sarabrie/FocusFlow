@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from bson import ObjectId
 
@@ -59,3 +59,49 @@ class RevokedTokenModel:
 	@staticmethod
 	async def is_revoked(jti: str) -> bool:
 		return await db.revoked_tokens.find_one({"_id": jti}, {"_id": 1}) is not None
+
+
+class LoginFailureModel:
+	"""Failed logins per email, kept in the database so every server instance sees the same count.
+
+	One document per email: {_id: email, count, expires_at}. The window starts at the first failure;
+	a TTL index on expires_at (see main.py) removes the document when the window ends.
+	"""
+
+	MAX_FAILURES = 5
+	WINDOW = timedelta(minutes=15)
+
+	@staticmethod
+	def _now() -> datetime:
+		return datetime.now(timezone.utc)
+
+	@staticmethod
+	def _aware(value: datetime) -> datetime:
+		# Motor returns naive UTC datetimes by default.
+		return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+	@staticmethod
+	async def retry_after(email: str) -> int:
+		"""Seconds until the email may try again, or 0 if it is not blocked."""
+		doc = await db.login_failures.find_one({"_id": email})
+		if not doc or doc.get("count", 0) < LoginFailureModel.MAX_FAILURES:
+			return 0
+		# The TTL monitor runs about once a minute, so an expired document may still be here.
+		remaining = (LoginFailureModel._aware(doc["expires_at"]) - LoginFailureModel._now()).total_seconds()
+		return max(1, int(remaining)) if remaining > 0 else 0
+
+	@staticmethod
+	async def record_failure(email: str):
+		now = LoginFailureModel._now()
+		# A window that already ended (but the TTL monitor hasn't removed yet) starts over.
+		await db.login_failures.delete_one({"_id": email, "expires_at": {"$lte": now}})
+		# $inc with upsert is atomic, so parallel requests on different instances can't skip the count.
+		await db.login_failures.update_one(
+			{"_id": email},
+			{"$inc": {"count": 1}, "$setOnInsert": {"expires_at": now + LoginFailureModel.WINDOW}},
+			upsert=True,
+		)
+
+	@staticmethod
+	async def reset(email: str):
+		await db.login_failures.delete_one({"_id": email})

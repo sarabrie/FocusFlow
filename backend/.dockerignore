@@ -1,0 +1,19 @@
+# Secrets and local environment: never baked into the image (it is public on Docker Hub)
+.env
+.env.*
+venv/
+.venv/
+
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Git and editor files
+.git
+.gitignore
+.vscode/
+.idea/
+Dockerfile
+.dockerignore
